@@ -7,17 +7,17 @@ This Standard is fully aligned with ISO/IEC 23271:2012.
 
 The following features have been added, extended or clarified in the Standard:
 
-- The presentation of the rules for assignment compatibility (§,§ ) has been extensively revised to a more precise and clearer relation-based format.
+- The presentation of the rules for assignment compatibility (§I.8.7, §III.1.8.1.2.3) has been extensively revised to a more precise and clearer relation-based format.
 - The presentation of the verification rules for many IL instructions has been revised to be more precise and clearer by building upon the revisions to the presentation of assignment compatibility.
 - The presentation of delegate signature compatibility has been revised along the same lines as assignment compatibility.
 - The verification rules for the IL newobj instruction have been extended to cover general delegate creation.
-- The dispatch rules for variance (§) have been extended to define resolutions for the ambiguities that can arise.
-- Type forwarders have been added to support the relocation of types between libraries (§)
+- The dispatch rules for variance (§II.12.2) have been extended to define resolutions for the ambiguities that can arise.
+- Type forwarders have been added to support the relocation of types between libraries (§II.6.8)
 
 The following changes of behavior have been made to the Standard:
 
-- The semantics of variance has been redefined making it a core feature of the CLI. In the previous edition of the Standard variance could be ignored by languages not wishing to support it (§); as exact type matches always took precedence over matches-by-variance. In this edition the dispatch rules for interfaces (§) also allow a match-by-variance to take precedence over an exact match, so all language implementation targeting the CLI must be aware of the behavior even if it is not supported in the language (§).
-- Additional requirements on ilsasm to metadata conversion. The left-to-right order of interfaces listed in a type header (§) must now be preserved as a top-to-bottom order in the InterfaceImpl table (§); and the top-to-bottom of method definitions (§,§) must now be preserved as a top-to-bottom order in the MethodDef table (§). Both these additional requirements are required to support the revised variance semantics.
+- The semantics of variance has been redefined making it a core feature of the CLI. In the previous edition of the Standard variance could be ignored by languages not wishing to support it (§I.1.8); as exact type matches always took precedence over matches-by-variance. In this edition the dispatch rules for interfaces (§II.12.2) also allow a match-by-variance to take precedence over an exact match, so all language implementation targeting the CLI must be aware of the behavior even if it is not supported in the language (§I.1.8).
+- Additional requirements on ilsasm to metadata conversion. The left-to-right order of interfaces listed in a type header (§II.10.2) must now be preserved as a top-to-bottom order in the InterfaceImpl table (§II.22.23); and the top-to-bottom of method definitions (§II.10.2, §II.25) must now be preserved as a top-to-bottom order in the MethodDef table (§II.22.26). Both these additional requirements are required to support the revised variance semantics.
 - System.Math and System.Double have been modified to better conform to IEEE (see §Partition IV and IEC 60559:1989)
 
 The following types have been added to the Standard or have been significantly updated (* represents an update).
@@ -207,7 +207,7 @@ For the purposes of this International Standard, the following definitions apply
 
 The Common Language Infrastructure (CLI) provides a specification for executable code and the execution environment (the Virtual Execution System) in which it runs. Executable code is presented to the VES as modules. A module is a single file containing executable content in the format specified in §Partition II.
 
-***The remainder of this clause and its subclauses contain only informative text***
+>  **The remainder of this clause and its subclauses contain only informative text**
 
 At the center of the CLI is a unified type system, the Common Type System that is shared by compilers, tools, and the CLI itself. It is the model that defines the rules the CLI follows when declaring, using, and managing types. The CTS establishes a framework that enables cross- language integration, type safety, and high performance code execution. This clause describes the architecture of the CLI by describing the CTS.
 
@@ -274,7 +274,7 @@ The discussion is broken down into four areas:
 - Common Language Specification – Restrictions required for language interoperability.
 - Virtual Execution System – How code is executed and how types are instantiated, interact, and die.
 
-***End informative text***
+>  **End informative text**
 
 ## I.7 Common Language Specification
 
@@ -286,7 +286,7 @@ The CLS is a set of rules intended to promote language interoperability. These r
 
 ### I.7.2 Views of CLS compliance
 
-***This block contains only informative text***
+> **This block contains only informative text**
 
 The CLS is a set of rules that apply to generated assemblies. Because the CLS is designed to support interoperability for libraries and the high-level programming languages used to write them, it is often useful to think of the CLS rules from the perspective of the high-level source code and tools, such as compilers, that are used in the process of generating assemblies. For this reason, informative notes are added to the description of CLS rules to assist the reader in understanding the rule’s implications for several different classes of tools and users. The different viewpoints used in the description are called **framework**, **consumer**, and **extender**, and are described here.
 
@@ -359,6 +359,256 @@ Extenders need not support the following:
 
 The CLS is designed to be large enough that it is properly expressive yet small enough that all languages can reasonably accommodate it.
 
-***End informative text***
+> **End informative text**
 
-> 
+> **CLS Rule 48:** If two or more CLS-compliant methods declared in a type have the same name and, for a specific set of instantiations, they have the same parameter and return types, then all these methods shall be semantically equivelant at those type instantiations.
+
+> [*Note*:
+>
+> **CLS (consumer):** May select any one of these methods.
+>
+> **CLS (extender):** Same as consumer.
+>
+> **CLS (framework)**: Shall not expose methods that violate this rule. 
+>
+> end note*]
+
+[*Note*: To avoid confusion, the CLS rules follow historical numbering from the previous version of this Standard, despite removal/addition of rules in this version. As such, the first rule shown in this partition is Rule 48. *end note*]
+
+### I.7.3 CLS compliance
+
+As these rules are introduced in detail, they are described in a common format. For an example, see the first rule below. The first paragraph specifies the rule itself. This is then followed by an informative description of the implications of the rule from the three different viewpoints as described above.
+
+The CLS defines language interoperability rules, which apply only to "externally visible" items. The CLS unit of that language interoperability is the assembly — that is, within a single assembly there are no restrictions as to the programming techniques that can be used. Thus, the CLS rules apply only to items that are visible (see §I.8.5.3) outside of their defining assembly and have **public**, **family**, or **family-or-assembly** accessibility (see §I.8.5.3.2).
+
+> **CLS Rule 1:** CLS rules apply only to those parts of a type that are are accessible or visible outside of the defining assembly.
+>
+> [*Note*:
+>
+> **CLS (consumer):** no impact.
+>
+> **CLS (extender):** when checking CLS compliance at compile time, be sure to apply the rules only to information that will be exported outside the assembly.
+>
+> **CLS (framework)**: CLS rules do not apply to internal implementation within an assembly. A type is CLS-compliant if all its publicly accessible parts (those classes, interfaces, methods, fields, properties, and events that are available to code executing in another assembly) either 
+>
+> - have signatures composed only of CLS-compliant types, or
+>
+> -  are specifically marked as not CLS-compliant. 
+>
+> *end note*]
+
+Any construct that would make it impossible to rapidly verify code is excluded from the CLS. This allows all CLS-compliant language translators to produce verifiable code if they so choose.
+
+#### I.7.3.1 Marking items as CLS-compliant
+
+The CLS specifies how to mark externally visible parts of an assembly to indicate whether or not they comply with the CLS requirements. (Implementers are discouraged from marking extensions to this standard as CLS-compliant.) This is done using the custom attribute mechanism (see §I.9.7 and §Partition II). The class `System.CLSCompliantAttribute` (see §Partition IV) indicates which types and type members are CLS-compliant. It also can be attached to an assembly, to specify the default level of compliance for all top-level types that assembly contains.
+
+The constructor for `System.CLSCompliantAttribute` takes a Boolean argument indicating whether the item with which it is associated is CLS-compliant. This allows any item (assembly, type, or type member) to be explicitly marked as CLS-compliant or not.
+
+The rules for determining CLS compliance are:
+
+- When an assembly does not carry an explicit `System.CLSCompliantAttribute`, it shall be assumed to carry `System.CLSCompliantAttribute(false)`.
+- By default, a type inherits the CLS-compliance attribute of its enclosing type (for nested types) or acquires the level of compliance attached to its assembly (for top-level types). A type can be marked as either CLS-compliant or not CLS-compliant by attaching the `System.CLSCompliantAttribute` attribute.
+- By default, other members (methods, fields, properties, and events) inherit the CLS- compliance of their type. They can be marked as not CLS-compliant by attaching the attribute `System.CLSCompliantAttribute(false)`.
+
+> **CLS Rule 2:** Members of non-CLS compliant types shall not be marked CLS-compliant.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Can ignore any member that is not CLS-compliant using the above rules.
+>
+> **CLS (extender):** Should encourage correct labeling of newly authored assemblies and publicly exported types and members. Compile-time enforcement of the CLS rules is strongly encouraged.
+>
+> **CLS (framework)**: Shall correctly label all publicly exported members as to their CLS compliance. The rules specified here can be used to minimize the number of markers required (for example, label the entire assembly if all types and members are compliant or if there are only a few exceptions that need to be marked).
+>
+> *end note*]
+
+## I.8 Common Type System
+
+Types describe values and specify a contract (see §I.8.6) that all values of that type shall support. Because the CTS supports Object-Oriented Programming (OOP) as well as functional and procedural programming languages, it deals with two kinds of entities: objects and values. **Values** are simple bit patterns for things like integers and floats; each value has a type that describes both the storage that it occupies and the meanings of the bits in its representation, and also the operations that can be performed on that representation. Values are intended for representing the corresponding simple types in programming languages like C, and also for representing non-objects in languages like C++ and Java™.
+
+**Objects** have rather more to them than do values. Each object is self-typing, that is, its type is explicitly stored in its representation. It has an identity that distinguishes it from all other objects, and it has slots that store other entities (which can be either objects or values). While the contents of its slots can be changed, the identity of an object never changes.
+
+There are several kinds of objects and values, as shown in the (informative) diagram below.
+
+The generics feature allows a whole family of types and methods to be defined using a pattern, which includes placeholders called *generic parameters*. These generic parameters are replaced, as required, by specific types, to instantiate whichever member of the family is actually required. The design of generics meets the following goals:
+
+- Orthogonality: Where possible, generic types can occur in any context where existing CLI types can occur.
+- Language independence: No assumptions about the source language are made. But CLI-generics attempts to support existing generics-like features of as many languages as possible. Furthermore, the design permits clean extensions of languages currently lacking generics.
+- Implementation independence: An implementation of the CLI is allowed to specialize representations and code on a case-by-case basis, or to share all representations and code, perhaps boxing and unboxing values to achieve this.
+- Implementation efficiency: Performance of generics is no worse than the use of `Object` to simulate generics; a good implementation can do much better, avoiding casts on reference type instantiations, and producing specialized code for value type instantiations.
+- Statically checkable at point of definition: A generic type definition can be validated and verified independently of its instantiations. Thus, a generic type is statically verifiable, and its methods are guaranteed to JIT-compile for all valid instantiations.
+- Uniform behavior with respect to generic parameters: In general, the behavior of parameterized types and generic methods is “the same” at all type instantiations.
+
+In addition, CLI supports covariant and contravariant generic parameters, with the following characteristics:
+
+- It is type-safe (based on purely static checking)
+- Simplicity: in particular, variance is only permitted on generic interfaces and generic delegates (not classes or value-types)
+- Variance affects call instructions that invoke a method from a variant interface. For non- variant interfaces, a method of the exact type specified in the call instruction must exist, and is invoked. For variant interfaces, a method of the exact type specified in the call instruction need not exist; only one that is a variant match for the type. Furthermore, if multiple matches exist, the declaration order and derivation of the methods determine which one is called, and a variant match may be invoked even if an exact match exists (II.12.2). All language systems targeting the CLI must take into account variance whether or not the source language supports the feature.
+- Enable implementation of more complex covariance scheme as used in some languages, e.g. Eiffel.
+
+> **This figure is informative**
+
+**Figure 1: Type System**
+
+TODO
+
+[*Note*: A managed pointer might point into the heap. *end note*]
+
+> **End informative figure**
+
+### I.8.1 Relatoinship to object-oriented programming
+
+> **This subclause contains only informative text**
+
+The term **type** is often used in the world of value-oriented programming to mean data representation. In the object-oriented world it usually refers to behavior rather than to representation. In the CTS, type is used to mean both of these things: two entities have compatible types if and only if they have compatible representations and compatible behaviors. Thus, in the CTS, if one type is derived from a base type, then instances of the derived type can be substituted for instances of the base type because both the representation and the behavior are compatible.
+
+Unlike in some OOP languages, in the CTS, two objects that have fundamentally different representations have different types. Some OOP languages use a different notion of type. They consider two objects to have the same type if they respond in the same way to the same set of messages. This notion is captured in the CTS by saying that the objects implement the same interface.
+
+Similarly, some OOP languages (e.g., Smalltalk) consider message passing to be the fundamental model of computation. In the CTS, this corresponds to calling virtual methods (see §I.8.4.4), where the signature of the virtual method plays the role of the message.
+
+The CTS itself does not directly capture the notion of “typeless programming.” That is, there is no way to call a non-static method without knowing the type of the object. Nevertheless, typeless programming can be implemented based on the facilities provided by the reflection package (see §Partition IV - Reflection) if it is implemented.
+
+> **End informative text**
+
+### I.8.2 Values and types
+
+Types describe *values*. Any value described by a type is called an *instance* of that type. Any use of a value—storing it, passing it as an argument, operating on it—requires a type. This applies in particular to all variables, arguments, evaluation stack locations, and method results. The type defines the allowable values and the allowable operations supported by the values of the type. All operators and functions have expected types for each of the values accessed or used.
+
+Every value has an *exact type* that fully describes its type properties.
+
+Every value is an instance of its exact type, and can be an instance of other types as well. In particular, if a value is an instance of a type that inherits from another type, it is also an instance of that other type.
+
+#### I.8.2.1 Value types and reference types
+
+There are two kinds of types: **value types** and **reference types**.
+
+- Value types – The values described by a value type are self-contained (each can be understood without reference to other values).
+- Reference types – A value described by a reference type denotes the location of another value. There are four kinds of reference type:
+  - An **object type** is a reference type of a self-describing value (see §I.8.2.3). Some object types (e.g., abstract classes) are only a partial description of a value.
+  - An **interface type** is always a partial description of a value, potentially supported by many object types.
+  - A **pointer type** is a compile-time description of a value whose representation is a machine address of a location. Pointers are divided into managed (§I.8.2.1.1, §I.12.1.1.2) and unmanaged (§I.8.9.2).
+  - Built-in reference types.
+
+##### 1.8.2.1.1 Managed pointers and related types
+
+A **managed pointer** (§I.12.1.1.2), or **byref** (§I.8.6.1.3, §I.12.4.1.5.2), can point to a local variable, parameter, field of a compound type, or element of an array. However, when a call crosses a remoting boundary (see §I.12.5) a conforming implementation can use a copy-in/copy- out mechanism instead of a managed pointer. Thus programs shall not rely on the aliasing behavior of true pointers. Managed pointer types are only allowed for local variable (§I.8.6.1.3) and parameter signatures (§I.8.6.1.4); they cannot be used for field signatures (§I.8.6.1.2), as the element type of an array (§I.8.9.1), and boxing a value of managed pointer type is disallowed (§I.8.2.4). Using a managed pointer type for the return type of methods (§I.8.6.1.5) is not verifiable (§I.8.8).
+
+[*Rationale*: For performance reasons items on the GC heap may not contain references to the interior of other GC objects, this motivates the restrictions on fields and boxing. Further returning a managed pointer which references a local or parameter variable may cause the reference to outlive the variable, hence it is not verifiable. *end rationale*]
+
+There are three value types in the Base Class Library (see §Partition IV - BCL): **System.TypedReference**, **System.RuntimeArgumentHandle**, and **System.ArgIterator**; which are treated specially by the CLI.
+
+The value type **System.TypedReference**, or **typed reference** or **typedref**, (§I.8.2.2, §I.8.6.1.3, §I.12.4.1.5.3) contains both a managed pointer to a location and a runtime representation of the type that can be stored at that location. Typed references have the same restrictions as byrefs. Typed references are created by the CIL instruction `mkrefany` (see §Partition III).
+
+The value types **System.RuntimeArgumentHandle** and **System.ArgIterator** (see §Partition IV and CIL instruction `arglist` in §Partition III), contain pointers into the VES stack. They can be used for local variable and parameter signatures. The use of these types for fields, method return types, the element type of an array, or in boxing is not verifiable (§I.8.8). These two types are referred to as **byref**-like types.
+
+#### I.8.2.2 Built-in value and reference types
+
+The following data types are an integral part of the CTS and are supported directly by the VES. They have special encoding in the persisted metadata:
+
+**Table I.1: Special Encoding**
+
+| Name in CIL assembler (see §Parition II) | CLS Type? | Name in class library (see §Parition IV) | Description                   |
+| ---------------------------------------- | --------- | ---------------------------------------- | ----------------------------- |
+| `bool`<sup>1</sup>                       | Yes       | `System.Boolean`                         | True/false value              |
+| `char`<sup>1</sup>                       | Yes       | `System.Char`                            | Unicode 16-bit char.          |
+| `object`                                 | Yes       | `System.Object`                          | Object or boxed value type    |
+| `string`                                 | Yes       | `System.String`                          | Unicode string                |
+| `float32`                                | Yes       | `System.Single`                          | IEC 60559:1989 32-bit float   |
+| `float64`                                | Yes       | `System.Double`                          | IEC 60559:1989 64-bit float   |
+| `int8`                                   | No        | `System.SByte`                           | Signed 8-bit integer          |
+| `int16`                                  | Yes       | `System.Int16`                           | Signed 16-bit integer         |
+| `int32`                                  | Yes       | `System.Int32`                           | Signed 32-bit integer         |
+| `int64`                                  | Yes       | `System.Int64`                           | Signed 64-bit integer         |
+| `native int`                             | yes       | `System.IntPtr`                          | Signed integer, native size   |
+| `native unsigned int`                    | No        | `System.UIntPtr`                         | Unsigned integer, native size |
+| `typedref`                               | No        | `System.TypedRefernece`                  | Pointer plus exact type       |
+| `unsigned int8`                          | Yes       | `System.Byte`                            | Unsigned 8-bit integer        |
+| `unsigned int16`                         | No        | `System.UInt16`                          | Unsigned 16-bit integer       |
+| `unsigned int32`                         | No        | `System.UInt32`                          | Unsigned 32-bit integer       |
+| `unsigned int64`                         | No        | `System.UInt64`                          | Unsigned 64-bit integer       |
+
+<sup>1</sup> `bool` and `char` are integer types in the categorization shown in the figure above.
+
+#### I.8.2.3 Classes, interfaces, and objects
+
+A type fully describes a value if it unambiguously defines the value’s representation and the operations defined on that value.
+
+For a value type, defining the representation entails describing the sequence of bits that make up the value’s representation. For a reference type, defining the representation entails describing the location and the sequence of bits that make up the value’s representation.
+
+A **method** describes an operation that can be performed on values of an exact type. Defining the set of operations allowed on values of an exact type entails specifying named methods for each operation.
+
+Some types are only a partial description; for example, **interface types**. These types describe a subset of the operations and none of the representation, and hence, cannot be an exact type of any value. Hence, while a value has only one exact type, it can also be a value of many other types as well. Furthermore, since the exact type fully describes the value, it also fully specifies all of the other types that a value of the exact type can have.
+
+While it is true that every value has an exact type, it is not always possible to determine the exact type by inspecting the representation of the value. In particular, it is *never* possible to determine the exact type of a value of a value type. Consider two of the built-in value types, 32-bit signed and unsigned integers. While each type is a full specification of their respective values (i.e., an exact type) there is no way to derive that exact type from a value’s particular 32-bit sequence.
+
+For some values, called **objects**, it is always possible to determine the exact type from the value. Exact types of objects are also called **object types**. Objects are values of reference types, but not all reference types describe objects. Consider a value that is a pointer to a 32-bit integer, a kind of reference type. There is no way to discover the type of the value by examining the pointer bits; hence it is not an object. Now consider the built-in CTS reference type `System.String` (see §Partition IV). The exact type of a value of this type is always determinable by examining the value, hence values of type `System.String` are objects, and `System.String` is an object type.
+
+#### I.8.2.4 Boxing and unboxing of values
+
+For every value type, the CTS defines a corresponding reference type called the **boxed type**. The reverse is not true: In general, reference types do not have a corresponding value type. The representation of a value of a boxed type (a **boxed value**) is a location where a value of the value type can be stored. A boxed type is an object type and a boxed value is an object.
+
+A boxed type cannot be directly referred to by name, therefore no field or local variable can be given a boxed type. The closest named base class to a boxed enumerated value type is `System.Enum`; for all other value types it is `System.ValueType`. Fields typed `System.ValueType` can only contain the null value or an instance of a boxed value type. Locals typed `System.Enum` can only contain the null value or an instance of a boxed enumeration type.
+
+All value types have an operation called `box`. Boxing a value of any value type produces its boxed value; i.e., a value of the corresponding boxed type containing a bitwise copy of the original value. If the value type is a nullable type—defined as an instantiation of the value type System.Nullable\<*T*\>—the result is a null reference or bitwise copy of its Value property of type *T*, depending on its `HasValue` property (false and true, respectively). All boxed types have an operation called `unbox`, which results in a managed pointer to the bit representation of the value.
+
+The `box` instruction can be applied to more than just value types; such types are called *boxable* types. A type is boxable if it is one of the following:
+
+- A value type (including instantiations of generic value types) excluding typed references (§I.8.2.1.1). Boxing a byref-like type is not verifiable (§I.8.2.1.1).
+  [*Rationale*: Typed references are excluded so that objects in the GC heap cannot contain references to the interior of other GC objects (§I.8.2.1.1). Byref-like types contain embedded pointers to entries in the VES stack. If byref-like types are boxed these embedded pointers could outlive the entries to which they point, so this operation is unverifiable. *end rationale*]
+- A reference type (including classes, arrays, delegates, and instantiations of generic classes) excluding managed pointers/byrefs (§I.8.2.1.1)
+- A generic parameter (to a generic type definition, or a generic method definition) [*Note*: Boxing and unboxing of generic arguments adds performance overhead to a CLI implementation. The constrained. prefix can improve performance during virtual dispatch to a method defined by a value type, by avoiding boxing the value type. *end note*]
+
+The type `System.Void` is never boxable.
+
+Interfaces and inheritance are defined only on reference types. Thus, while a value type definition (§I.8.9.7) can specify both interfaces that shall be implemented by the value type and the class (`System.ValueType` or `System.Enum`) from which it inherits, these apply only to boxed values.
+
+> **CLS Rule 3:** Boxed value types are not CLS-compliant.
+>
+> [*Note*:
+>
+> In lieu of boxed types, use `System.Object`, `System.ValueType`, or `System.Enum`, as appropriate.
+>
+> **CLS (consumer):** Need not import boxed value types.
+>
+> **CLS (extender):** Need not provide syntax for defining or using boxed value types.
+>
+> **CLS (framework)**: Shall not use boxed value types in its publicly exported aspects.
+>
+> *end note*]
+
+#### I.8.2.5 Identity and equality of values
+
+There are two binary operators defined on all pairs of values: **identity** and **equality**. They return a Boolean result, and are mathematical **equivalence** operators; that is, they are:
+
+- Reflexive – `a op a` is true.
+- Symmetric – `a op b` is true if and only if `b op a` is true
+- Transitive – if `a op b` is true and `b op c` is true, then `a op c` is true.
+
+In addition, while identity always implies equality, the reverse is not true. To understand the difference between these operations, consider three variables, A, B, and C, whose type is `System.String`, where the arrow is intended to mean "is a reference to":
+
+The values of the variables are **identical** if the locations of the sequences of characters are the same (i.e., there is, in fact, only one string in memory). The values stored in the variables are **equal** if the sequences of characters are the same. Thus, the values of variables A and B are identical, the values of variables A and C as well as B and C are not identical, and the values of all three of A, B, and C are equal.
+
+##### I.8.2.5.1 Identity
+
+The identity operator is defined by the CTS as follows.
+
+- If the values have different exact types, then they are not identical.
+- Otherwise, if their exact type is a value type, then they are identical if and only if the bit sequences of the values are the same, bit by bit.
+- Otherwise, if their exact type is a reference type, then they are identical if and only if the locations of the values are the same.
+
+Identity is implemented on `System.Object` via the `ReferenceEquals` method.
+
+##### I.8.2.5.2 Equality
+
+For value types, the equality operator is part of the definition of the exact type. Definitions of equality should obey the following rules:
+
+- Equality should be an equivelance ooperator, as defined above.
+- Identity should imply equality, as stated earlier.
+- If either (or both) operand is a boxed value, equality should be computed by
+  - first unboxing any boxed operand(s), and then
+  - applying the usual rules for equality on the resulting values.
+
+Equality is implemented on `System.Object` via the `Equals` method.
+
+[*Note*: Although two floating point NaNs are defined by IEC 60559:1989 to always compare as unequal, the contract for `System.Object.Equals` requires that overrides must satisfy the requirements for an equivalence operator. Therefore, `System.Double.Equals` and `System.Single.Equals` return True when comparing two NaNs, while the equality operator returns False in that case, as required by the IEC standard. *end note*]
