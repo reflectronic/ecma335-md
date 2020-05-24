@@ -181,8 +181,7 @@ For the purposes of this International Standard, the following definitions apply
 
 **profile:** A set of libraries, grouped together to form a consistent whole that provides a fixed level of functionality.
 
-**proper
-y:** A member that defines a named value and the methods that access that value. A property definition defines the accessing contracts on that value. Hence, the property definition specifies which accessing methods exist and their respective method contracts.
+**property:** A member that defines a named value and the methods that access that value. A property definition defines the accessing contracts on that value. Hence, the property definition specifies which accessing methods exist and their respective method contracts.
 
 **signature:** The part of a contract that can be checked and automatically enforced. Signatures are formed by adding constraints to types and other signatures. A constraint is a limitation on the use of or allowed operations on a value or location.
 
