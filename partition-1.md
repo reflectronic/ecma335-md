@@ -362,7 +362,7 @@ The CLS is designed to be large enough that it is properly expressive yet small 
 > **End informative text**
 
 > **CLS Rule 48:** If two or more CLS-compliant methods declared in a type have the same name and, for a specific set of instantiations, they have the same parameter and return types, then all these methods shall be semantically equivelant at those type instantiations.
-
+>
 > [*Note*:
 >
 > **CLS (consumer):** May select any one of these methods.
@@ -371,7 +371,7 @@ The CLS is designed to be large enough that it is properly expressive yet small 
 >
 > **CLS (framework)**: Shall not expose methods that violate this rule. 
 >
-> end note*]
+> *end note*]
 
 [*Note*: To avoid confusion, the CLS rules follow historical numbering from the previous version of this Standard, despite removal/addition of rules in this version. As such, the first rule shown in this partition is Rule 48. *end note*]
 
@@ -757,14 +757,14 @@ To refer to a named entity in a scope, both the scope and the name in the scope 
 ```
 class A
 {
-    int32 IntInsideA;
+	int32 IntInsideA;
 }
 class B inherits from A
 {
-    method X(int32, int32)
-    {
-        IntInsideA := 15;
-    }
+	method X(int32, int32)
+	{
+		IntInsideA := 15;
+	}
 }
 ```
 
@@ -1137,3 +1137,426 @@ The CTS does not have the notion of **global statics**: all statics are associat
 The CTS does not include a model for file- or function-scoped static functions or data members. However, there are times when a compiler needs a metadata token to emit into CIL for a scoped function or data member. The metadata allows members to be marked so that they are never visible or accessible outside of the PE/COFF file in which they are declared and for which the compiler guarantees to enforce all access rules.
 
 > **End informative text**
+
+## I.10 Name and type rules for the Common Language Specification
+### I.10.1 Identifiers
+Languages that are either case-sensitive or case-insensitive can support the CLS. Since its rules apply only to items exported to other languages, **private** members or types that aren’t exported from an assembly can use any names they choose. For interoperation, however, there are some restrictions.
+
+In order to make tools work well with a case-sensitive language it is important that the exact case of identifiers be maintained. At the same time, when dealing with non-English languages encoded in Unicode, there might be more than one way to represent precisely the same identifier that includes combining characters. The CLS requires that identifiers obey the restrictions of the appropriate Unicode standard and they are persisted in Canonical form C, which preserves case but forces combining characters into a standard representation. See CLS Rule 4, in §I.8.5.1.
+
+At the same time, it is important that externally visible names not conflict with one another when used from a case-insensitive programming language. As a result, all identifier comparisons shall be done internally to CLS-compliant tools using the Canonical form KC, which first transforms characters to their case-canonical representation. See CLS Rule 4, in §I.8.5.1.
+
+### I.10.2 Overloading
+
+[*Note*: Although the CTS describes inheritance, object layout, name hiding, and overriding of virtual methods, it does not discuss overloading at all. While this is surprising, it arises from the fact that overloading is entirely handled by compilers that target the CTS and not the type system itself. In the metadata, all references to types and type members are fully resolved and include the precise signature that is intended. This choice was made since every programming language has its own set of rules for coercing types and the VES does not provide a means for expressing those rules. *end note*]
+
+Following the rules of the CTS, it is possible for duplicate names to be defined in the same scope as long as they differ in either kind (field, method, etc.) or signature. The CLS imposes a stronger restriction for overloading methods. Within a single scope, a given name can refer to any number of methods provided they differ in any of the following:
+ - Number of parameters
+ - Type of any parameter
+
+Notice that the signature includes more information, but CLS-compliant languages need not produce or consume classes that differ only by that additional information (see §Partition II for the complete list of information carried in a signature):
+- Calling convention
+- Custom modifiers
+- Return type
+- Whether a parameter is passed by value or by reference
+
+There is one exception to this rule. For the special names `op_Implicit` and `op_Explicit`, described in §I.10.3.3, methods can be provided that differ only by their return type. These are marked specially and can be ignored by compilers that don’t support operator overloading.
+
+Properties shall not be overloaded by type (that is, by the return type of their getter method), but they can be overloaded with different number or types of indices (that is, by the number and types of the parameters of their **getter** methods). The overloading rules for properties are identical to the method overloading rules.
+
+> **CLS Rule 37:** Only properties and methods can be overloaded.
+>
+> **CLS Rule 38:** Properties and methods can be overloaded based only on the number and types of their parameters, except the conversion operators named `op_Implicit` and `op_Explicit`, which can also be overloaded based on their return type.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Can assume that only properties and methods are overloaded, and need not support overloading based on return type unless providing special syntax for operator overloading. If return type overloading isn’t supported, then the `op_Implicit` and `op_Explicit` can be ignored since the functionality shall be provided in some other way by a CLS-compliant framework. Consumers must first apply the hide-by-name and hide-by-signature-and-name rules (§I.8.10.4) to avoid any ambiguity.
+>
+> **CLS (extender):** Should not permit the authoring of overloads other than those specified here. It is not necessary to support operator overloading at all, hence it is possible to entirely avoid support for overloading on return type.
+>
+> **CLS (framework)**: Shall not publicly expose overloading except as specified here. Frameworks authors should bear in mind that many programming languages, including object-oriented languages, do not support overloading and will expose overloaded methods or properties through mangled names. Most languages support neither operator overloading nor overloading based on return type, so `op_Implicit` and `op_Explicit` shall always be augmented with some alternative way to gain the same functionality.
+> 
+> *end note*]
+
+[*Note*: The names visible on any class `C`, are the names visible in that class and its base classes. As a consequence, the names of methods on interfaces implemented by `C` that are only implemented via MethodImpls (see §Partition II) are not visible on class `C`. The names visible on an interface `I`, consist only of the names directly defined on this interface. As a consequence, the names of methods from other interfaces (which `I` requires be implemented) are not visible on `I` itself *end note*]
+
+### I.10.3 Operator overloading
+CLS-compliant consumer and extender tools are under no obligation to allow defining of operator overloading. CLS-compliant consumer and extender tools do not have to provide a special mechanism to call these methods.
+
+[*Note*: This topic is addressed by the CLS so that
+ - languages that do provide operator overloading can describe their rules in a way that other languages can understand, and
+ - languages that do not provide operator overloading can still access the underlying functionality without the addition of special syntax.
+ 
+ *end note*]
+
+Operator overloading is described by using the names specified below, and by setting a special bit in the metadata (**SpecialName**) so that they do not collide with the user’s name space. A CLS-compliant producer tool shall provide some means for setting this bit. If these names are used, they shall have precisely the semantics described here.
+
+#### I.10.3.1 Unary operators
+Unary operators take one operand, perform some operation on it, and return the result. They are represented as static methods on the class that defines the type of their one operand. §Table I.4: Unary Operator Names shows the names that are defined.
+
+**Table I.4: Unary Operator Names**
+| **Name** | **ISO/IEC 14882:2003 C++ Operator Symbol** (This column is informative.) |
+| ---------- | ---------- |
+| `op_Decrement` | Similar to `--` <sup>1</sup> |
+| `op_Increment` | Similar to `++` <sup>1</sup> |
+| `op_UnaryNegation` | Similar to `-` (unary) |
+| `op_UnaryPlus` | Similar to `+` (unary) |
+| `op_LogicalNot` | `!` |
+| `op_True`<sup>2</sup> | Not defined |
+| `op_False`<sup>2</sup> | Not defined |
+| `op_AddressOf` | `&` (unary) |
+| `op_OnesComplement` | `~` |
+| `op_PointerDereference` | `*` (unary) |
+
+<sup>1</sup> From a pure C++ point of view, the way one must write these functions for the CLI differs in one very important aspect. In C++, these methods must increment or decrement their operand directly, whereas, in CLI, they must not; instead, they simply return the value of their operand +/- 1, as appropriate, without modifying their operand. The operand must be incremented or decremented by the compiler that generates the code for the ++/-- operator, separate from the call to these methods.
+
+<sup>2</sup> The `op_True` and `op_False` operators do not exist in C++. They are provided to support tristate Boolean types, such as those used in database languages.
+
+#### I.10.3.2 Binary operators
+Binary operators take two operands, perform some operation on them, and return a value. They are represented as static methods on the class that defines the type of one of their two operands. §Table I.5: Binary Operator Names shows the names that are defined.
+
+**Table I.5: Unary Operator Names**
+| **Name** | **ISO/IEC 14882:2003 C++ Operator Symbol** (This column is informative.) |
+| ---------- | ---------- |
+| `op_Addition` | `+` (binary) |
+| `op_Substraction` | `-` (binary) |
+| `op_Multiply` | `*` (binary) |
+| `op_Division` | `/` |
+| `op_Modulus` | `%` |
+| `op_ExclusiveOr` | `^` |
+| `op_BitwiseAnd` | `&` (binary) |
+| `op_BitwiseOr` | `|` |
+| `op_LogicalAnd` | `&&` |
+| `op_LogicalOr` | `||` |
+| `op_Assign` | Not defined (= is not the same) |
+| `op_LeftShift` | `<<` |
+| `op_RightShift` | `>>` |
+| `op_SignedRightShift` | Not defined |
+| `op_UnsignedRightShift` | Not defined |
+| `op_Equality` | `==` |
+| `op_GreaterThan` | `>` |
+| `op_LessThan` | `<` |
+| `op_Inequality` | `!=` |
+| `op_GreaterThanOrEqual` | `>=` |
+| `op_LessThanOrEqual` | `<=` |
+| `op_UnsignedRightShiftAssignment` | Not defined |
+| `op_MemberSelection` | `->` |
+| `op_RightShiftAssignment` | `>>=` |
+| `op_MultiplicationAssignment` | `*=` |
+| `op_PointerToMemberSelection` | `->*` |
+| `op_SubtractionAssignment` | `-=` |
+| `op_ExclusiveOrAssignment` | `^=` |
+| `op_LeftShiftAssigment` | `<<=` |
+| `op_ModulusAssignment` | `%=` |
+| `op_AdditionAssignment` | `+=` |
+| `op_BitwiseAndAssignment` | `&=` |
+| `op_BitwiseOrAssignment` | `|=` |
+| `op_Comma` | `,` |
+| `op_DivisionAssignment` | `/=` |
+
+#### I.10.3.3 Conversion operators
+Conversion operators are unary operations that allow conversion from one type to another. The operator method shall be defined as a static method on either the operand or return type. There are two types of conversions:
+- An implicit (**widening**) coercion shall not lose any magnitude or precision. These should be provided using a method named `op_Implicit`.
+- An explicit (**narrowing**) coercion can lose magnitude or precision. These should be provided using a method named `çop_Explicit`.
+
+[*Note*:  Conversions provide functionality that can’t be generated in other ways, and many languages do not support the use of the conversion operators through special syntax. Therefore, CLS rules require that the same functionality be made available through an alternate mechanism. It is recommended that the more common ToXxx (where Xxx is the target type) and FromYyy (where Yyy is the name of the source type) naming pattern be used.
+ *end note*]
+
+Because these operations can exist on the class of their operand type (so-called “from” conversions) and would therefore differ on their return type only, the CLS specifically allows that these two operators be overloaded based on their return type. The CLS, however, also requires that if this form of overloading is used then the language shall provide an alternate means for providing the same functionality since not all CLS languages will implement operators with special syntax.
+
+> **CLS Rule 39:** If either `op_Implicit` or `op_Explicit` is provided, an alternate means of providing the coercion shall be provided.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Where appropriate to the language design, use the existence of `op_Implicit` and/or `op_Explicit` in choosing method overloads and generating automatic coercions.
+>
+> **CLS (extender):** Where appropriate to the language design, implement user-defined implicit or explicit coercion operators using the corresponding `op_Implicit`, `op_Explicit`, `ToXxx`, and/or `FromXxx` methods.
+>
+> **CLS (framework)**: If coercion operations are supported, they shall be provided as `FromXxx` and `ToXxx`, and optionally `op_Implicit` and `op_Explicit` as well. CLS frameworks are encouraged to provide such coercion operations.
+> 
+> *end note*]
+
+### I.10.4 Naming patterns
+
+See also §Partition VI. While the CTS does not dictate the naming of properties or events, the CLS does specify a pattern to be observed. For Events:
+An individual event is created by choosing or defining a delegate type that is used to indicate the event. Then, three methods are created with names based on the name of the event and with a fixed signature. For the examples below we define an event named `Click` that uses a delegate type named `EventHandler`.
+
+```
+EventAdd, used to add a handler for an event
+	Pattern: void add_<EventName> (<DelegateType> handler)
+	Example: viod add_Click (EventHandler handler);
+
+EventRemove, used to remove a handler for an event
+	Pattern: void remove_<EventName> (<DelegateType> handler)
+	Example: void remove_Click (EventHandler handler);
+
+EventRaise, used to indicate than an event has occurred
+	Pattern: void family raise_<EventName> (Event e)
+```
+
+For Properties: 
+An individual property is created by deciding on the type returned by its getter method and the types of the getter’s parameters (if any). Then, two methods are created with names based on the name of the property and these types. For the examples below we define two properties: Name takes no parameters and returns a `System.String`, while `Item` takes a `System.Object` parameter and returns a `System.Object`. Item is referred to as an indexed property, meaning that it takes parameters and thus can appear to the user as through it were an array with indices.
+
+```
+PropertyGet, used to read the value of the property
+	Pattern: <PropType> get_<PropName> (<Indices>)
+	Example: System.String getName ();
+	Example: System.Object getItem (System.Object key);
+
+PropertySet, used to modify the value of the property
+	Pattern: void set_<PropName> (<Indices>, <PropType>)
+	Example: void set_Name (System.String name);
+	Example: void set_Item (System.Object key, System.Object value);
+```
+
+### I.10.5 Exceptions
+The CLI supports an exception handling model, which is introduced in §I.12.4.2. CLScompliant frameworks can define and throw externally visible exceptions, but there are restrictions on the type of objects thrown:
+
+> **CLS Rule 40:** Objects that are thrown shall be of type `System.Exception` or a type inheriting from it. Nonetheless, CLS-compliant methods are not required to block the propagation of other types of exceptions.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not support throwing or catching of objects that are not of the specified type.
+>
+> **CLS (extender):** Must support throwing of objects of type `System.Exception` or a type inheriting from it. Need not support the throwing of objects having other types.
+>
+> **CLS (framework)**: Shall not publicly expose thrown objects that are not of type `System.Exception` or a type inheriting from it.
+> 
+> *end note*]
+
+### I.10.6 Custom attributes
+In order to allow languages to provide a consistent view of custom attributes across language boundaries, the Base Class Library provides support for the following rule defined by the CLS:
+
+> **CLS Rule 41:** Attributes shall be of type System.Attribute, or a type inheriting from it.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not support attributes that are not of the specified type.
+>
+> **CLS (extender):** Must support the authoring of custom attributes.
+>
+> **CLS (framework)**: Shall not publicly expose attributes that are not of type `System.Attribute` or a type inheriting from it. 
+> 
+> *end note*]
+
+The use of a particular attribute class can be restricted in various ways by placing an attribute on the attribute class. The `System.AttributeUsageAttribute` is used to specify these restrictions. The restrictions supported by the `System.AttributeUsageAttribute` are:
+
+- What kinds of constructs (types, methods, assemblies, etc.) can have the attribute applied to them. By default, instances of an attribute class can be applied to any construct. This is specified by setting the value of the `ValidOn` property of `System.AttributeUsageAttribute`. Several constructs can be combined.
+- Multiple instances of the attribute class can be applied to a given piece of metadata. By default, only one instance of any given attribute class can be applied to a single metadata item. The `AllowMultiple` property of the attribute is used to specify the desired value.
+- Do not inherit the attribute when applied to a type. By default, any attribute attached to a type should be inherited to types that derive from it. If multiple instances of the attribute class are allowed, the inheritance performs a union of the attributes inherited from the base class and those explicitly applied to the derived class type. If multiple instances are not allowed, then an attribute of that type applied directly to the derived class overrides the attribute supplied by the base class. This is specified by setting the `Inherited` property of `System.AttributeUsageAttribute` to the desired value.
+
+[*Note*:  Since these are CLS rules and not part of the CTS itself, tools are required to specify explicitly the custom attributes they intend to apply to any given metadata item. That is, compilers or other tools that generate metadata must implement the AllowMultiple and Inherit rules. The CLI does not supply attributes automatically. The usage of attributes in the CLI is further described in §Partition II.
+ *end note*]
+
+### I.10.7 Generic types and methods
+The following subclauses describe the CLS rules for generic types and methods.
+
+#### I.10.7.1 Nested type parameter re-declaration
+Any type exported by a CLS-compliant framework, that is nested in a generic type, itself declares, by position, all the generic parameters of that enclosing type. (The nested type can also introduce new generic parameters.) As such, any CLS-compliant type nested inside a generic type is itself generic. Such redeclared generic parameters shall precede any newly introduced generic parameters. [*Example:* Consider the following C# source code:
+
+````cs
+public class A<T> {
+	public class B {}
+	public class C<U, V> {
+		public class D<W> {}
+    }
+}
+public class X {
+	public class Y<T> {}
+}
+````
+
+The relevant corresponding ILAsm code is:
+```
+.class ... A`1<T> ... { // T is introduced
+	.class ... nested ... B<T> ... { } 			// T is redeclared
+	.class ... nested ... C'2<T,U,V> ... {			// T is redeclared; U and V are introduced
+		...class nested ... D`1<T,U,V,W> ... { }	// T, U, and V are redeclared; W is introduced
+	}
+}
+.class ... X ... {
+	.class ... nested Y`1<T> ... { }			// Nothing is redeclared; T is introduced
+}
+```
+As generic parameter re-declaration is based on parameter position matching, not on parameter name matching, the name of a redeclared generic parameter need not be the same as the one it redeclares. For example:
+```
+.class ... A`<T> ... {						// T is introduced
+	.class ... nested ... B<Q> { }				// T is redeclared (as Q)
+	.class ... nested ... C`2<T1,U,V> ... {			// T is redeclared (as T1); U and V are introduced
+		.class ... nested ... D`1<R1,R2,R3,W> ... { }	// T1, U, and V are redeclared (as R1, R2, and R3); W is introduced
+	}
+}
+```
+A CLS-compliant Framework should therefore expose the following types:
+| **Lexical Name**| **Total Generic Parameters** | **Redeclared Generic Parameters** | **Introduced Generic Parameters** |
+| ---------- | ---------- | ---------- | ---------- |
+| `A<T>` | `1 (T)` | `0` | `1 T` |
+| `A<T>.B` | `1 (T)` | `1 T` | `0` |
+| `A<T>.C<U,V>` | `3 (T,U,V)` | `1 T` | `2 U,V` |
+| `A<T>.C<U,V>.D<W>` | `4 (T,U,V,W)` | `3 T,U,V` | `1 W` |
+| `X` | `0` | `0` | `0` |
+| `X.Y<T>` | `1 (T)` | `0` | `1 T` |
+
+*end example*]
+
+> **CLS Rule 42:** Nested types shall have at least as many generic parameters as the enclosing type. Generic parameters in a nested type correspond by position to the generic parameters in its enclosing type.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not consume types that violate this rule.
+>
+> **CLS (extender):** Same as consumers. Extenders choosing to support definition of types nested in generic types shall follow this rule for externally visible types.
+>
+> **CLS (framework)**: Shall not expose types that violate this rule.
+>
+> *end note*]
+
+#### I.10.7.2 Type names and arity encoding
+CLS-compliant generic type names are encoded using the format “name[\`arity]” , where […] indicates that the grave accent character “\`” and arity together are optional. The encoded name shall follow these rules:
+
+ 1. *name* shall be an *ID* (see §Partition II) that does not contain the “\`” character.
+ 2. *arity* is specified as an unsigned decimal number without leading zeros or spaces.
+ 3. For a normal generic type, *arity* is the number of type parameters declared on the type.
+ 4. For a nested generic type, *airty* is the number of newly introduced type parameters.
+ 
+ [*Example:* Consider the following C# source code:
+ ```cs
+ public class A<T> {
+	public class B {}
+	public class C<,U,V> {
+		public class D<W> {}
+	}
+}
+public class X {
+	public class Y<T> {}
+}
+```
+The relevant corresponding ILAsm code is:
+```cs
+.class ... A`1<T> ... {						// T is introduced
+	.class ... nested ... B<T> ... { }			// T is redeclared
+	.class ... nested ... C`2<T,U,V> ... {			// T is redeclared; U and V are introduced
+		.class ... nested ... D`1<T,U,V,W> ... { }	// T, U, and V are redeclared; W is introduced
+	}
+}
+.class ... X ... {
+	.class ... nested Y`1<T> ... { }			// Nothing is redeclared; T is introduced
+}
+```
+
+A CLS-compliant Framework should expose the following types:
+| **Lexical Name**| **Total Generic Parameters** | **Redeclared Generic Parameters** | **Introduced Generic Parameters** | **Metadata Encoding**
+| ---------- | ---------- | ---------- | ---------- | ---------- |
+| `A<T>` | `1 (T)` | `0` | `1 T` | ```A`1``` |
+| `A<T>.B` | `1 (T)` | `1 T` | `0` | `B` |
+| `A<T>.C<U,V>` | `3 (T,U,V)` | `1 T` | `2 U,V` | ```C`2``` |
+| `A<T>.C<U,V>.D<W>` | `4 (T,U,V,W)` | `3 T,U,V` | `1 W` | ```D`1``` |
+| `X` | `0` | `0` | `0` | `X` |
+| `X.Y<T>` | `1 (T)` | `0` | `1 T` | ```Y`1``` |
+
+While a type name encoded in metadata does not explicitly mention its enclosing type, the CIL and Reflection type name grammars do include this detail:
+| **Lexical Name**| **Metadata Encoding** | **CIL** | **Reflection** |
+| ---------- | ---------- | ---------- | ----------  |
+| `A<T>` | ```A`1``` | ```A`1``` | ```A`1[T]``` |
+| `A<T>.B` | `B` | ```A`1/B``` | ```A`1+B[T]``` |
+| `A<T>.C<U,V>` | ```C`2``` | ```A`1/C`2``` | ```A`1+C`2[T,U,V]``` |
+| `A<T>.C<U,V>.D<W>` | ```D`1``` | ```A`1/C`2/D`1``` | ```A`1+C`2+D`1[T,U,V,W]```  |
+| `X` | `X` | `X` | `X` |
+| `X.Y<T>` | ```Y`1``` | ```X/Y`1``` | ```X+Y`1[T]``` |
+
+*end example*]
+
+> **CLS Rule 43:** The name of a generic type shall encode the number of type parameters declared on the non-nested type, or newly introduced to the type if nested, according to the rules defined above.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not consume types that violate this rule.
+>
+> **CLS (extender):** Same as consumers. Extenders choosing to support definition of generic types shall follow this rule for externally visible types.
+>
+> **CLS (framework)**: Shall not expose types that violate this rule.
+> 
+> *end note*]
+
+##### I.10.7.3 Type constrain re-declaration
+CLS Frameworks shall ensure that a generic type explicitly re-declares any constraints present on generic parameters in its base class and all implemented interfaces. Put another way, CLS Extenders and Consumers should be able to examine just the specific type in question, to determine the set of constraints that need to be satisfied.
+
+> **CLS Rule 44:** A generic type shall redeclare sufficient constraints to guarantee that any constraints on the base type, or interfaces would be satisfied by the generic type constraints.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not consume types that violate this rule. Consumers who check constraints need only look at the type being instantiated to determine the applicable constraints.
+>
+> **CLS (extender):** Same as consumers. Extenders choosing to support definition of generic types shall follow this rule.
+>
+> **CLS (framework)**: Shall not expose types that violate this rule.
+> 
+> *end note*]
+
+#### I.10.7.4 Contraint type restrictions
+> **CLS Rule 45:** Types used as constraints on generic parameters shall themselves be CLScompliant.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not consume types that violate this rule.
+>
+> **CLS (extender):** Same as consumers. Extenders choosing to support definition of generic types shall follow this rule when checking for CLS compliance, and need not provide syntax to violate this rule.
+>
+> **CLS (framework)**: Shall not expose types that violate this rule.
+> 
+> *end note*]
+
+##### I.10.7.5 Frameworks and accessibility of nested types
+CLI generics treat the generic type declaration and all instantiations of that generic type as having the same accessibility scope. However, language accessibility rules may differ in this regard, with some choosing to follow the CLI accessibility model, while others use a more restrictive, per-instantiation model. To enable consumption by all CLS languages, CLS frameworks shall be designed with a conservative per-instantiation model of accessibility in mind, and not expose nested types or require access to protected members based on specific, alternate instantiations of a generic type.
+
+This has implications for signatures containing nested types with **family** accessibility. Open generic types shall not expose fields or members with signatures containing a specific instantiation of a nested generic type with family accessibility. Non-generic types extending a specific instantiation of a generic base class or interface, shall not expose fields or members with signatures containing a different instantiation of a nested generic type with family accessibility. [*Example*: Consider the following C# source code:
+```cs
+public class C<T> {
+	protected class n {...}
+	protected void M1(C<int>.N n) {...}	// Not CLS-compliant - C<int>.N not accessible from within C<T> in all languages
+	protected void M2(C<T>.n n) {...}	// CLS-compliant - C<T>.N accessible inside C<T>
+}
+
+public class D : C<long> {
+	protected void M3(C<int>.N n) {...}	// Not CLS-compliant - C<int>.N is not accessible in D (extends C<long>)
+	protected void M4(C<long>.N n) {...}	// CLS-compliant, C<long>.N is accessible in D (extends C<long>)
+}
+```
+The relevant corresponding ILASM code is:
+```
+.class public ... C`1<T> ... {
+	.class ... nested N<T> ... {}
+	.method family hidebysig instance void M1(class C`1/n<int32> n) {}	// Not CLS-compliant - C<int>.N is not accessible from withing C<T> in all languages
+	.method family hidebysig instance void M2(class C`1/N<!0> n) ... {}	// CLS-compliant - C<T>.N is accessible inside C<T>
+}
+.class public ... D extends class C`1<int64> {
+	.method family hidebysig instance void M3(class C`1/N<int32> n) .. {}	// Not CLS-compliant - C<int>.N is not accessible in D (extends C<long>)
+	.method family hidebysig instance void M4(class C`1/N<int64> n) ... {}	// CLS-compliant, C<long>.N is accessible in D (extends C<long>)
+}
+```
+*end example*]
+> **CLS Rule 46:** The visibility and accessibility of members (including nested types) in an instantiated generic type shall be considered to be scoped to the specific instantiation rather than the generic type declaration as a whole. Assuming this, the visibility and accessibility rules of CLS rule 12 still apply.
+>
+> [*Note*:
+>
+> **CLS (consumer):** Need not consume types that violate this rule.
+>
+> **CLS (extender):** Shall use this more restrictive notion of accessibility when determining CLS compliance.
+>
+> **CLS (framework)**: Shall not expose members that violate this rule.
+> 
+> *end note*]
+
+#### I.10.7.6 Frameworks and abstract or virtual methods
+CLS Frameworks shall not expose libraries that require CLS Extenders to override or implement generic methods to use the framework. This does not imply that virtual or abstract generic methods are non-compliant; rather, the framework shall also provide concrete implementations with appropriate default behavior.
+> **CLS Rule 47:** For each abstract or virtual generic method, there shall be a default concrete (nonabstract) implementation.
+>
+> [*Note*:
+>
+> **CLS (consumer):** No impact.
+>
+> **CLS (extender):** Need not provide syntax for overriding generic methods.
+>
+> **CLS (framework)**: Shall not expose generic methods that violate this rule without also providing appropriate concrete implementations.
+> 
+> *end note*]
