@@ -1611,4 +1611,285 @@ The complete set of CLS rules are collected here for reference. Recall that thes
 **CLS Rule 45:** Types used as constrains on generic parameters shall themselves be CLS-compliant. (§I.10.7.4)  
 **CLS Rule 46:** The visibility and accessibility of members (including nested types) in an instantiated generic type shall be considered to be scoped to the specific instantiation rather than the generic type declaration as a whole. Assuming this, the visibility and accessibility rules of CLS rule 12 still apply. (§I.10.7.5)  
 **CLS Rule 47:** For each abstract or virtual generic method, there shall be a default concrete (non-abstract) implementation. (§I.10.7.6)  
-**CLS Rule 48:** If two or more CLS-compliant methods in a type have the same named and, for a specific set of type instantiateions, they have the same parameter and return types, then all these methods shall be semantically equivalent at those type instantiations. (§I.7.2.1)  
+**CLS Rule 48:** If two or more CLS-compliant methods in a type have the same named and, for a specific set of type instantiateions, they have the same parameter and return types, then all these methods shall be semantically equivalent at those type instantiations. (§I.7.2.1)
+
+## I.12 Virtual Execution System
+The Virtual Execution System (VES) provides an environment for executing managed code. It provides direct support for a set of built-in data types, defines a hypothetical machine with an associated machine model and state, a set of control flow constructs, and an exception handling model. To a large extent, the purpose of the VES is to provide the support required to execute the CIL instruction set (see §Partition III).
+
+### I.12.1 Supported data types
+The CLI directly supports the data types shown in §Table I.6: Data Types Directly Supported by the CLI. That is, these data types can be manipulated using the CIL instruction set (see §Partition III).
+**Table I.6: Data Types Directly Supported by the CLI**
+| **Data Type** | **Description**
+| ---------- | ---------- |
+| `int8` | 8-bit two’s-complement signed value |
+| `unsigned int8` |8-bit unsigned binary value |
+| `int16` | 16-bit two’s-complement signed value |
+| `unsigned int16` | 16-bit unsigned binary value |
+| `int32` | 32-bit two’s-complement signed value |
+| `unsigned int32` | 32-bit unsigned binary value |
+| `int64 64-bit` | two’s-complement signed value |
+| `unsigned int64` | 64-bit unsigned binary value |
+| `float32` | 32-bit IEC 60559:1989 floating-point value |
+| `float64` | 64-bit IEC 60559:1989 floating-point value |
+| `native int` | native size two’s-complement signed value |
+| `native unsigned int` | native size unsigned binary value, also unmanaged pointer |
+| `F` | native size floating-point number (internal to VES, not user visible) |
+| `O` | native size object reference to managed memory |
+| `&` | native size managed pointer (can point into managed memory) |
+
+The CLI model uses an evaluation stack. Instructions that copy values from memory to the evaluation stack are “loads”; instructions that copy values from the stack back to memory are “stores”. The full set of data types in §Table I.6: Data Types Directly Supported by the CLI can be represented in memory. However, the CLI supports only a subset of these types in its operations upon values stored on its evaluation stack—`int32`, `int64`, and `native int`. In addition, the CLI supports an internal data type to represent floating-point values on the internal evaluation stack. The size of the internal data type is implementation-dependent. For further information on the treatment of floating-point values on the evaluation stack, see §I.12.1.3 and §Partition III. Short numeric values (`int8`, `int16`, `unsigned int8`, and `unsigned int16`) are widened when loaded and narrowed when stored. This reflects a computer model that assumes, for numeric and object references, memory cells are 1, 2, 4, or 8 bytes wide, but stack locations are either 4 or 8 bytes wide. User-defined value types can appear in memory locations or on the stack and have no size limitation; the only built-in operations on them are those that compute their address and copy them between the stack and memory.
+The only CIL instructions with special support for short numeric values (rather than support for simply the 4- or 8-byte integral values) are:
+- Load and store instructions to/from memory: `ldelem`, `ldind`, `stelem`, `stind`.
+- Data conversion: `conv`, `conv.ovf`
+- Array creation: `newarr`
+
+The signed integer types (`int8`, `int16`, `int32`, `int64`, and `native int`) and their corresponding unsigned integer types (`unsigned int8`, `unsigned int16`, `unsigned int32`, `unsigned int64`, and `native unsigned int`) differ only in how the bits of the integer are interpreted. For those operations in which an unsigned integer is treated differently from a signed integer (e.g., in comparisons or arithmetic with overflow) there are separate instructions for treating an integer as unsigned (e.g., `cgt.un` and `add.ovf.un`).
+
+This instruction set design simplifies CIL-to-native code (e.g., JIT) compilers and interpreters of CIL by allowing them to internally track a smaller number of data types. See §I.12.3.2.1.
+
+As described below, CIL instructions do not specify their operand types. Instead, the CLI keeps track of operand types based on data flow and aided by a stack consistency requirement described below. For example, the single add instruction will add two integers or two floats from the stack.
+
+#### I.12.1.1 Native size: native int, native unsigned int, O and &
+The native-size types (`native int`, `native unsigned int`, `O`, and `&`) are a mechanism in the CLI for deferring the choice of a value’s size. These data types exist as CIL types; however, the CLI maps each to the native size for a specific processor. (For example, data type I would map to `int32` on a Pentium processor, but to `int64` on an IA64 processor.) So, the choice of size is deferred until JIT compilation or runtime, when the CLI has been initialized and the architecture is known. This implies that field and stack frame offsets are also not known at compile time. For languages like Visual Basic, where field offsets are not computed early anyway, this is not a hardship. In languages like C or C++, where sizes must be known when source code is compiled, a conservative assumption that they occupy 8 bytes is sometimes acceptable (for example, when laying out compile-time storage).
+
+#### I.12.1.1.1 Unmanaged pointes as type native unsigned int
+[*Rationale:* For languages like C, when compiling all the way to native code, where the size of a pointer is known at compile time and there are no managed objects, the fixed-size unsigned integer types (`unsigned int32` or `unsigned int64`) can serve as pointers. However choosing pointer size at compile time has its disadvantages. If pointers were chosen to be 32- bit quantities at compile time, the code would be restricted to 4 gigabytes of address space, even if it were run on a 64-bit machine. Moreover, a 64-bit CLI would need to take special care so those pointers passed back to 32-bit code would always fit in 32 bits. If pointers were chosen at compile time to be 64 bits, the code would run on a 32-bit machine, but pointers in every data structure would be twice as large as necessary on that CLI.
+
+For other languages, where the size of a data type need not be known at compile time, it is desirable to defer the choice of pointer size from compile time to CLI initialization time. In that way, the same CIL code can handle large address spaces for those applications that need them, while also being able to reap the size benefit of 32-bit pointers for those applications that do not need a large address space. *end rationale*]
+
+The `native unsigned int` type is used to represent unmanaged pointers with the VES. The metadata allows unmanaged pointers to be represented in a strongly typed manner, but these types are translated into type `native unsigned int` for use by the VES.
+
+##### I.12.1.1.2 Object reference and managed pointer types: O and &
+The `O` data type represents an object reference that is managed by the CLI. As such, the number of specified operations is severely limited. In particular, references shall only be used on operations that indicate that they operate on reference types (e.g., `ceq` and `ldind.ref`), or on operations whose metadata indicates that references are allowed (e.g., `call`, `ldsfld`, and `stfld`).
+
+The `&` data type (managed pointer) is similar to the `O` type, but points to the interior of an object. That is, a managed pointer is allowed to point to a field within an object or an element within an array, rather than to point to the ‘start’ of object or array.
+
+Object references (`O`) and managed pointers (`&`) can be changed during garbage collection, since the data to which they refer might be moved.
+
+[*Note:* In summary, object references, or `O` types, refer to the ‘outside’ of an object, or to an object as-a-whole. But managed pointers, or `&` types, refer to the interior of an object. The `&` types are sometimes called “byref types” in source languages, since passing a field of an object by reference is represented in the VES by using an `&` type to represent the type of the parameter. *end note*]
+
+In order to allow managed pointers to be used more flexibly, they are also permitted to point to areas that aren’t under the control of the CLI garbage collector, such as the evaluation stack, static variables, and unmanaged memory. This allows them to be used in many of the same ways that unmanaged pointers (`U`) are used. Verification restrictions guarantee that, if all code is verifiable, a managed pointer to a value on the evaluation stack doesn’t outlast the life of the location to which it points.
+
+##### I.12.1.1.3 Portability: storing pointers in memory
+Several instructions, including `calli`, `cpblk`, `initblk`, `ldind.*`, and `stind.*`, expect an address on the top of the stack. If this address is derived from a pointer stored in memory, there is an important portability consideration.
+
+ 1. Code that stores pointers in a native-sized integer or pointer location (types `native int`, `O`, `native unsigned int`, or `&`) is always fully portable.
+ 2. Code that stores pointers in an 8-byte integer (type `int64` or `unsigned int64`) can be portable. But this requires that a `conv.ovf.un` instruction be used to convert the pointer from its memory format before its use as a pointer. This might cause a runtime exception if run on a 32-bit machine.
+ 3. Code that uses any smaller integer type to store a pointer in memory ( `int8`, `unsigned int8`, `int16`, `unsigned int16`, `int32`, unsigned `int32`) is *never* portable, even though the use of an `unsigned int32` or `int32` will work correctly on a 32-bit machine.
+
+#### I.12.1.2 Handling of short integer data types
+The CLI defines an evaluation stack that contains either 4-byte or 8-byte integers; however, it also has a memory model that encompasses 1- and 2-byte integers. To be more precise, the following rules are part of the CLI model:
+ - Loading from 1- or 2-byte locations (arguments, locals, fields, statics, pointers) expands to 4-byte values. For locations with a known type (e.g., local variables) the type being accessed determines whether the load sign-extends (signed locations) or zero-extends (unsigned locations). For pointer dereference (`ldind.*`), the instruction itself identifies the type of the location (e.g., `ldind.u1` indicates an unsigned location, while `ldind.i1` indicates a signed location).
+ - Storing into a 1- or 2-byte location truncates to fit and will not generate an overflow error. Specific instructions (`conv.ovf.*`) can be used to test for overflow before storing.
+- Calling a method assigns values from the evaluation stack to the arguments for the method, hence it truncates just as any other store would when the argument is larger than the parameter.
+- Returning from a method assigns a value to an invisible return variable, so it also truncates as a store would when the type of the value returned is larger than the return type of the method. Since the value of this return variable is then placed on the evaluation stack, it is then sign-extended or zero-extended as would any other load. Note that this truncation followed by extending is *not* identical to simply leaving the computed value unchanged.
+
+It is the responsibility of any translator from CIL to native machine instructions to make sure that these rules are faithfully modeled through the native conventions of the target machine. The CLI does not specify, for example, whether truncation of short integer arguments occurs at the call site or in the target method.
+
+#### I.12.1.3 Handling of floating-point data types
+Floating-point calculations shall be handled as described in IEC 60559:1989. This standard describes encoding of floating-point numbers, definitions of the basic operations and conversion, rounding control, and exception handling.
+
+The standard defines special values, **NaN** (not a number), **+infinity**, and **–infinity**. These values are returned on overflow conditions. A general principle is that operations that have a value in the limit return an appropriate infinity while those that have no limiting value return **NaN** (see the standard for details).
+
+[*Note:* The following examples show the most commonly encountered cases.
+```
+X rem 0 = Nan
+0 * +infinity = 0 * -infinity = NaN
+(X / 0) =	+infinity, if X > 0
+			NaN, if X = 0
+			infinity, if X < 0
+NaN op X = X op NaN = NaN for all operations
+(+infinity) + (+infinity) = (+infinity)
+X / (+infinity) = 0
+X mod (-infinity) = -X
+(+infinity) - (+infinity) = NaN
+```
+This standard does not specify the behavior of arithmetic operations on denormalized floatingpoint numbers, nor does it specify when or whether such representations should be created. This is in keeping with IEC 60559:1989. In addition, this standard does not specify how to access the exact bit pattern of NaNs that are created, nor the behavior when converting a NaN between 32- bit and 64-bit representation. All of this behavior is deliberately left implementation-specific. *end note*]
+
+For purposes of comparison, infinite values act like a number of the correct sign, but with a very large magnitude when compared with finite values. For comparison purposes, **NaN** is ‘unordered’ (see `clt`, `clt.un`).
+
+While the IEC 60559:1989 standard also allows for exceptions to be thrown under unusual conditions (such as overflow and invalid operand), the CLI does not generate these exceptions. Instead, the CLI uses the **NaN**, **+infinity**, and **–infinity** return values and provides the instruction ckfinite to allow users to generate an exception if a result is **NaN**, **+infinity**, or **–infinity**.
+
+The rounding mode defined in IEC 60559:1989 shall be set by the CLI to “round to the nearest number,” and neither the CIL nor the class library provide a mechanism for modifying this setting. Conforming implementations of the CLI need not be resilient to external interference with this setting. That is, they need not restore the mode prior to performing floating-point operations, but rather, can rely on it having been set as part of their initialization.
+
+For conversion to integers, the default operation supplied by the CIL is “truncate towards zero”. Class libraries are supplied to allow floating-point numbers to be converted to integers using any of the other three traditional operations (**round** to nearest integer, **floor** (truncate towards – infinity), **ceiling** (truncate towards +infinity)).
+
+Storage locations for floating-point numbers (statics, array elements, and fields of classes) are of fixed size. The supported storage sizes are `float32` and `float64`. Everywhere else (on the evaluation stack, as arguments, as return types, and as local variables) floating-point numbers are represented using an internal floating-point type. In each such instance, the nominal type of the variable or expression is either `float32` or `float64`, but its value can be represented internally with additional range and/or precision. The size of the internal floating-point representation is implementation-dependent, can vary, and shall have precision at least as great as that of the variable or expression being represented. An implicit widening conversion to the internal representation from `float32` or `float64` is performed when those types are loaded from storage. The internal representation is typically the native size for the hardware, or as required for efficient implementation of an operation. The internal representation shall have the following characteristics:
+
+ - The internal representation shall have precision and range greater than or equal to the nominal type.
+ - Conversions to and from the internal representation shall preserve value.
+
+[*Note:* This implies that an implicit widening conversion from `float32` (or `float64`) to the internal representation, followed by an explicit conversion from the internal representation to `float32` (or `float64`), will result in a value that is identical to the original `float32` (or `float64`) value. *end note*]
+
+[*Rationale:* This design allows the CLI to choose a platform-specific high-performance representation for floating-point numbers until they are placed in storage locations. For example, it might be able to leave floating-point variables in hardware registers that provide more precision than a user has requested. At the same time, CIL generators can force operations to respect language-specific rules for representations through the use of conversion instructions. *end rationale*]
+
+When a floating-point value whose internal representation has greater range and/or precision than its nominal type is put in a storage location, it is automatically coerced to the type of the storage location. This can involve a loss of precision or the creation of an out-of-range value (**NaN**, **+infinity**, or **-infinity**). However, the value might be retained in the internal representation for future use, if it is reloaded from the storage location without having been modified. It is the responsibility of the compiler to ensure that the retained value is still valid at the time of a subsequent load, taking into account the effects of aliasing and other execution threads (see memory model (§I.12.6)). This freedom to carry extra precision is not permitted, however, following the execution of an explicit conversion (`conv.r4` or `conv.r8`), at which time the internal representation must be exactly representable in the associated type.
+
+[*Note:* To detect values that cannot be converted to a particular storage type, a conversion instruction (`conv.r4`, or `conv.r8`) can be used, followed by a check for a non-finite value using `ckfinite`. Underflow can be detected by converting to a particular storage type, comparing to zero before and after the conversion. *end note*]
+
+[*Note:* The use of an internal representation that is wider than `float32` or `float64` can cause differences in computational results when a developer makes seemingly unrelated modifications to their code, the result of which can be that a value is spilled from the internal representation (e.g., in a register) to a location on the stack. end note]
+
+#### I.12.1.4 CIL instructions and numeric types
+>  **This subclase contains only informative text**
+
+Most CIL instructions that deal with numbers take their operands from the evaluation stack (see §I.12.3.2.1), and these inputs have an associated type that is known to the VES. As a result, a single operation like add can have inputs of any numeric data type, although not all instructions can deal with all combinations of operand types. Binary operations other than addition and subtraction require that both operands be of the same type. Addition and subtraction allow an integer to be added to or subtracted from a managed pointer (types & and O). Details are specified in §Partition II.
+
+Instructions fall into the following categories:
+
+<u>**Numeric**</u>**:** These instructions deal with both integers and floating point numbers, and consider integers to be signed. Simple arithmetic, conditional branch, and comparison instructions fit in this category.
+<u>**Integer**</u>**:** These instructions deal only with integers. Bit operations and unsigned integer division/remainder fit in this category.
+<u>**Floating-point**</u>**:** These instructions deal only with floating-point numbers.
+<u>**specific**</u>**:** These instructions deal with integer and/or floating-point numbers, but have variants that deal specially with different sizes and unsigned integers. Integer operations with overflow detection, data conversion instructions, and operations that transfer data between the evaluation stack and other parts of memory (see §I.12.3.2) fit into this category.
+<u>**Unsigned/unordered**</u>**:** There are special comparison and branch instructions that treat integers as unsigned and consider unordered floating-point numbers specially (as in “branch if greater than or unordered”):
+<u>**Load constant**</u>**:** The load constant (`ldc.*`) instructions are used to load constants of type `int32`, `int64`, `float32`, or `float64`. Native size constants (type `native int`) shall be created by conversion from `int32` (conversion from `int64` would not be portable) using `conv.i` or `conv.u`.
+
+§Table I.7: CIL Instructions by Numeric Category shows the CIL instructions that deal with numeric values, along with the category to which they belong. Instructions that end in “.*” indicate all variants of the instruction (based on size of data and whether the data is treated as signed or unsigned). The notation “[.s]” means both the long and short forms of these instructions.
+
+**Table I.7: CIL Instructions by Numeric Category**
+| | | | |
+| - | - | - | - |
+| add | Numeric | div | Numeric |
+| add.ovf.* | Specific | div.un | Integer |
+| and | Integer | idc.* | Load constant |
+| beq[.s] | Numeric | ldelem.* | Specific |
+| bge[.s] | Numeric | ldind.* | Specific |
+| bge.un[.s] | Numeric | mul | Numeric |
+| bgt[.s] | Numeric | mul.ovf.* | Specific |
+| ble.[s] | Numeric | newarr.* | Specific |
+| ble.un[.s] | Unsigned/unordered | not | Integer |
+| blt[.s] | Numeric | or | Integer |
+| blt.un[.s] | Unsigned/unordered | rem | Numeric |
+| bne.un[.s] | Unsigned/unordered |rem.un | Integer |
+| ceq | Numeric | shl | Integer |
+| cgt | Numeric | shr | Integer |
+| cgt.un | Unsigned/unordered | shr.un | Specific |
+| ckfinite | Floating point | stelem.* | Specific |
+| clt | Numeric | stind.* | Specific |
+| clt.un | Unsigned/unordered | sub | Numeric |
+| conv.* | Specific | sub.ovf.* | Specific |
+| conv.ovf.* | Specific | xor | Integer |
+
+> **End informative text**
+
+#### I.12.1.5 CIL instructions and pointer types
+> **This ssubclase contains only informative text.**
+
+[*Rationale:* Some implementations of the CLI will require the ability to track pointers to objects and to collect objects that are no longer reachable (thus providing memory management by “garbage collection”). This process moves objects in order to reduce the working set and thus will modify all pointers to those objects as they move. For this to work correctly, pointers to objects can only be used in certain ways. The `O` (object reference) and `&` (managed pointer) data types are the formalization of these restrictions. end rationale]
+
+The use of object references is tightly restricted in the CIL. They are used almost exclusively with the “virtual object system” instructions, which are specifically designed to deal with objects. In addition, a few of the base instructions of the CIL handle object references. In particular, object references can be:
+
+ - Loaded onto the evaluation stack to be passed as arguments to methods (`ldloc`, `ldarg`), and stored from the stack to their home locations (`stloc`, `starg`)
+ - Duplicated or popped off the evaluation stack (`dup`, `pop`)
+ - Tested for equality with one another, but not other data types (`beq`, `beq.s`, `bne`, `bne.s`, `ceq`)
+ - Loaded-from / stored-into unmanaged memory, in type unmanaged code only (`ldind.ref`, `stind.ref`)
+ - Created as a null reference (`ldnull`)
+ - Returned as a value (`ret`)
+ 
+ Managed pointers have several additional base operations. 
+ - Addition and subtraction of integers, in units of bytes, returning a managed pointer (`add`, `add.ovf.u`, `sub`, `sub.ovf.u`)
+ - Subtraction of two managed pointers to elements of the same array, returning the number of bytes between them (`sub`, `sub.ovf.u`)
+ - Unsigned comparison and conditional branches based on two managed pointers (`bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s`, `blt.un`, `blt.un.s`, `cgt.un`, `clt.un`)
+ 
+ Arithmetic operations upon managed pointers are intended *only* for use on pointers to elements of the same array. If other uses of arithmetic on managed pointers are made, the behavior is unspecified.
+ 
+[*Rationale:* Since the memory manager runs asynchronously with respect to programs and updates managed pointers, both the distance between distinct objects and their relative position can change. *end rationale*]
+
+> **End informative text**
+
+#### I.12.1.6 Aggregate data
+> **This subclause contains only informative text**
+
+The CLI supports aggregate data, that is, data items that have sub-components (arrays, structures, or object instances) but are passed by copying the value. The sub-components can include references to managed memory. Aggregate data is represented using a value type, which can be instantiated in two different ways:
+ - **Boxed:** as an object, carrying full type information at runtime, and typically allocated on the heap by the CLI memory manager.
+ - **Unboxed:** as a “value type instance” that does *not* carry type information at runtime and that is never allocated directly on the heap. It can be part of a larger structure on the heap – a field of a class, a field of a boxed value type, or an element of an array. Or it can be in the local variables or incoming arguments array (see §I.12.3.2). Or it can be allocated as a static variable or static member of a class or a static member of another value type.
+ 
+Because value type instances, specified as method arguments, are copied on method call, they do not have “identity” in the sense that objects (boxed instances of classes) have
+
+##### I.12.1.6.1 Homes for values
+The **home** of a data value is where it is stored for possible reuse. The CLI directly supports the following home locations:
+- An incomming **argument**
+- A **local variable** of a method.
+- An instance **field** of an object or value type
+- A **static** field of a class, interface, or module
+- An **array element**
+
+For each home location, there is a means to compute (at runtime) the address of the home location and a means to determine (at JIT compile time) the type of a home location. These are summarized in §Table I.8: Address and Type of Home Locations.
+
+**Table I.8: Address and Type of Home Locations**
+| **Type of Home** | **Runtime Address Computation** | **JIT compile time Type Determination** |
+| ---------- | ---------- | ---------- |
+| Argument | `ldarga` for by-value arguments or `ldarg` for by-reference (byref) arguments | Method signature |
+| Local Variable | `ldloca` for by-value locals or `ldloc` for byreference (byref) byref locals | Locals signature in method header |
+| Field | `ldflda` | Type of field in the class, interface, or module |
+| Static | `ldsflda` | Type of field in the class, interface, or module |
+| Array Element | `ldelema` for single-dimensional zero-based arrays or call the instance method **Address** | Element type of array |
+
+In addition to homes, built-in values can exist in two additional ways (i.e., without homes):
+1. as constant values (typically embedded in the CIL instruction stream using `ldc.*` instructions)
+2. as an intermediate value on the evaluation stack, when returned by a method or CIL instruction.
+
+##### I.12.1.6.2 Operations on value type instances
+Value type instances can be §created, §passed as arguments, §returned as values, and stored into and extracted from locals, fields, and elements of arrays (i.e., §copied). Like classes, value types can have both static and non-static members (methods and fields). But, because they carry no type information at runtime, value type instances are not substitutable for items of type `System.Object`; in this respect, they act like the built-in types int32, int64, and so forth. There are two operations, §box and §unbox, that convert between value type instances and objects.
+
+###### I.12.1.6.2.1 Initializing instances of value types
+There are two ways to load a value type onto the evaluation stack:
+ - Directly load the value from a home that has the appropriate type, using an `ldarg`, `ldloc`, `ldfld`, or `ldsfld` instruction.
+ - Compute the address of the value type, then use an `ldobj` instruction.
+
+Similarly, there are two ways to store a value type from the evaluation stack:
+ - Directly store the value into a home of the appropriate type, using a `starg`, `stloc`, `stfld`, or `stsfld` instruction.
+ - Compute the address of the value type, then use a `stobj` instruction.
+ 
+###### I.12.1.6.2.2 Loading and storing instances of value types
+There are two ways to load a value type onto the evaluation stack:
+- Directly load the value from a home that has the appropriate type, using an `ldarg`, `ldloc`, `ldfld`, or `ldsfld` instruction.
+- Compute the address of the value type, then use an `ldobj` instruction.
+
+Similarly, there are two ways to store a value type from the evaluation stack:
+- Directly store the value into a home of the appropriate type, using a `starg`, `stloc`, `stfld`, or `stsfld` instruction.
+- Compute the address of the value type, then use a `stobj` instruction.
+
+###### I.12.1.6.2.3 Passing and returning value types
+Value types are treated just as any other value would be treated:
+
+ 1. **To pass a value type by value**, simply load it onto the stack as you would any other argument: use `ldloc`, `ldarg`, etc., or call a method that returns a value type. To access a value type parameter that has been passed by value use the `ldarga` instruction to compute its address or the ldarg instruction to load the value onto the evaluation stack.
+ 2. **To pass a value type by reference**, load the address of the value type as you normally would (see §Table I.8: Address and Type of Home Locations). To access a value type parameter that has been passed by reference use the `ldarg` instruction to load the address of the value type and then the `ldobj` instruction to load the value type onto the evaluation stack.
+ 3. **To return a value type**, just load the value onto an otherwise empty evaluation stack and then issue a `ret` instruction.
+
+###### I.12.1.6.2.4 Calling methods
+Static methods on value types are handled no differently from static methods on an ordinary class: use a `call` instruction with a metadata token specifying the value type as the class of the method. Non-static methods (i.e., instance and virtual methods) are supported on value types, but they are given special treatment. A non-static method on a reference type (rather than a value type) expects a **this** pointer that is an instance of that class. This makes sense for reference types, since they have identity and the **this** pointer represents that identity. Value types, however, have identity only when boxed. To address this issue, the **this** pointer on a non-static method of a value type is a byref parameter of the value type rather than an ordinary by-value parameter.
+
+A non-static method on a value type can be called in the following ways:
+
+ - For unboxed instances of a value type, the exact type is known statically. The `call` instruction can be used to invoke the function, passing as the first parameter (the **this** pointer) the address of the instance. The metadata token used with the `call` instruction shall specify the value type itself as the class of the method.
+ - Given a boxed instance of a value type, there are three cases to consider:
+	 - Instance or virtual methods introduced on the value type itself: unbox the instance and call the method directly using the value type as the class of the method.
+	 - Virtual methods inherited from a base class: use the `callvirt` instruction and specify the method on the `System.Object`, `System.ValueType` or `System.Enum` class as appropriate.
+	 - Virtual methods on interfaces implemented by the value type: use the `callvirt` instruction and specify the method on the interface type.
+
+###### I.12.1.6.2.5 Boxing and unboxing
+**Boxing** and **unboxing** are conceptually equivalent to (and can be seen in higher-level languages as) casting between a value type instance and `System.Object`. Because they change data representations, however, boxing and unboxing are like the widening and narrowing of various sizes of integers (the `conv` and `conv.ovf` instructions) rather than the casting of reference types (the `isinst` and `castclass` instructions). The `box` instruction is a widening (always type-safe) operation that converts a value type instance to `System.Object` by making a copy of the instance and embedding it in a newly allocated object. `unbox` is a narrowing (runtime exception can be generated) operation that converts a `System.Object` (whose exact type is a value type) to a value type instance. This is done by computing the address of the embedded value type instance without making a copy of the instance.
+
+###### I.12.1.6.2.6 castclass and isinst on value types
+Casting to and from value type instances isn’t permitted (the equivalent operations are `box` and `unbox`). When `boxed`, however, it is possible to use the `isinst` instruction to see whether a value of type `System.Object` is the boxed representation of a particular class
+
+###### I.12.1.6.3 Opaque classes
+Some languages provide multi-byte data structures whose contents are manipulated directly by address arithmetic and indirection operations. To support this feature, the CLI allows value types to be created with a specified size but no information about their data members. Instances of these “opaque classes” are handled in precisely the same way as instances of any other class, but the `ldfld`, `stfld`, `ldflda`, `ldsfld`, and `stsfld` instructions shall not be used to access their contents
+
+> **End informative text**
+
+### I.12.2 Module information
+§Partition II provides details of the CLI PE file format. The CLI relies on the following information about each method defined in a PE file:
+
+- The *instructions* composing the method body, including all exception handlers.
+- The *signature* of the method, which specifies the return type and the number, order, parameter passing convention, and built-in data type of each of the arguments. It also specifies the native calling convention (this does *not* affect the CIL virtual calling convention, just the native code).
+- The *exception handling array*. This array holds information delineating the ranges over which exceptions are filtered and caught. See §Partition II and §I.12.4.2.
+- The size of the evaluation stack that the method will require.
+- The size of the locals array that the method will require.
+- A “`localsinit` flag” that indicates whether the local variables and memory pool (§I.12.3.2.4) should be initialized by the CLI (see also localloc §III.3.47).
+- Type of each local variable in the form of a signature of the local variable array (called the “locals signature”).
+
+In addition, the file format is capable of indicating the degree of portability of the file. There is one kind of restriction that can be described:
+- Restriction to a specific 32-bit size for integers.
+
+By stating which restrictions are placed on executing the code, the CLI class loader can prevent non-portable code from running on an architecture that it cannot support.
