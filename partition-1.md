@@ -1613,7 +1613,7 @@ The complete set of CLS rules are collected here for reference. Recall that thes
 **CLS Rule 47:** For each abstract or virtual generic method, there shall be a default concrete (non-abstract) implementation. (§I.10.7.6)  
 **CLS Rule 48:** If two or more CLS-compliant methods in a type have the same named and, for a specific set of type instantiateions, they have the same parameter and return types, then all these methods shall be semantically equivalent at those type instantiations. (§I.7.2.1)
 
-### I.12 Virtual Execution System
+## I.12 Virtual Execution System
 The Virtual Execution System (VES) provides an environment for executing managed code. It provides direct support for a set of built-in data types, defines a hypothetical machine with an associated machine model and state, a set of control flow constructs, and an exception handling model. To a large extent, the purpose of the VES is to provide the support required to execute the CIL instruction set (see §Partition III).
 
 ### I.12.1 Supported data types
@@ -1677,7 +1677,7 @@ Several instructions, including `calli`, `cpblk`, `initblk`, `ldind.*`, and `sti
  2. Code that stores pointers in an 8-byte integer (type `int64` or `unsigned int64`) can be portable. But this requires that a `conv.ovf.un` instruction be used to convert the pointer from its memory format before its use as a pointer. This might cause a runtime exception if run on a 32-bit machine.
  3. Code that uses any smaller integer type to store a pointer in memory ( `int8`, `unsigned int8`, `int16`, `unsigned int16`, `int32`, unsigned `int32`) is *never* portable, even though the use of an `unsigned int32` or `int32` will work correctly on a 32-bit machine.
 
-##### I.12.1.2 Handling of short integer data types
+#### I.12.1.2 Handling of short integer data types
 The CLI defines an evaluation stack that contains either 4-byte or 8-byte integers; however, it also has a memory model that encompasses 1- and 2-byte integers. To be more precise, the following rules are part of the CLI model:
  - Loading from 1- or 2-byte locations (arguments, locals, fields, statics, pointers) expands to 4-byte values. For locations with a known type (e.g., local variables) the type being accessed determines whether the load sign-extends (signed locations) or zero-extends (unsigned locations). For pointer dereference (`ldind.*`), the instruction itself identifies the type of the location (e.g., `ldind.u1` indicates an unsigned location, while `ldind.i1` indicates a signed location).
  - Storing into a 1- or 2-byte location truncates to fit and will not generate an overflow error. Specific instructions (`conv.ovf.*`) can be used to test for overflow before storing.
@@ -1839,8 +1839,17 @@ There are two ways to load a value type onto the evaluation stack:
 Similarly, there are two ways to store a value type from the evaluation stack:
  - Directly store the value into a home of the appropriate type, using a `starg`, `stloc`, `stfld`, or `stsfld` instruction.
  - Compute the address of the value type, then use a `stobj` instruction.
+ 
+###### I.12.1.6.2.2 Loading and storing instances of value types
+There are two ways to load a value type onto the evaluation stack:
+- Directly load the value from a home that has the appropriate type, using an `ldarg`, `ldloc`, `ldfld`, or `ldsfld` instruction.
+- Compute the address of the value type, then use an `ldobj` instruction.
 
-####### I.12.1.6.2.3 Passing and returning value types
+Similarly, there are two ways to store a value type from the evaluation stack:
+- Directly store the value into a home of the appropriate type, using a `starg`, `stloc`, `stfld`, or `stsfld` instruction.
+- Compute the address of the value type, then use a `stobj` instruction.
+
+###### I.12.1.6.2.3 Passing and returning value types
 Value types are treated just as any other value would be treated:
 
  1. **To pass a value type by value**, simply load it onto the stack as you would any other argument: use `ldloc`, `ldarg`, etc., or call a method that returns a value type. To access a value type parameter that has been passed by value use the `ldarga` instruction to compute its address or the ldarg instruction to load the value onto the evaluation stack.
