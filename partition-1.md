@@ -1893,3 +1893,330 @@ In addition, the file format is capable of indicating the degree of portability 
 - Restriction to a specific 32-bit size for integers.
 
 By stating which restrictions are placed on executing the code, the CLI class loader can prevent non-portable code from running on an architecture that it cannot support.
+
+### I.12.3 Machine state
+One of the design goals of the CLI is to hide the details of a method call frame from the CIL code generator. This allows the CLI (and not the CIL code generator) to choose the most efficient calling convention and stack layout. To achieve this abstraction, the call frame is integrated into the CLI. The machine state definitions below reflect these design choices, where machine state consists primarily of global state and method state.
+
+#### I.12.3.1 The global state
+The CLI manages multiple concurrent threads of control (not necessarily the same as the threads provided by a host operating system), multiple managed heaps, and a shared memory address space.
+
+[*Note:* A thread of control can be thought of, somewhat simplistically, as a singly linked list of method states, where a new state is created and linked back to the current state by a method call instruction – the traditional model of a stack-based calling sequence. Notice that this model of the thread of control doesn’t correctly explain the operation of tail., jmp, or throw instructions. *end note*]
+
+§Figure 2: Machine State Model illustrates the machine state model, which includes threads of control, method states, and multiple heaps in a shared address space. Method state, shown separately in §Figure 3: Method State, is an abstraction of the stack frame. Arguments and local variables are part of the method state, but they can contain Object References that refer to data stored in any of the managed heaps. In general, arguments and local variables are only visible to the executing thread, while instance and static fields and array elements can be visible to multiple threads, and modification of such values is considered a side-effect.
+
+TODO: Put image
+**Figure 2: Machine State Model**
+
+TODO: Put image
+**Figure 3: Method State**
+
+#### I.12.3.2 Method state
+Method state describes the environment within which a method executes. (In conventional compiler terminology, it corresponds to a superset of the information captured in the “invocation stack frame”). The CLI method state consists of the following items:
+
+ - An *instruction pointer* (**IP**) – This points to the next CIL instruction to be executed by the CLI in the present method
+ - An *evaluation stack* – The stack is empty upon method entry. Its contents are entirely local to the method and are preserved across call instructions (that’s to say, if this method calls another, once that other method returns, our evaluation stack contents are “still there”). The evaluation stack is not addressable. At all times it is possible to deduce which one of a reduced set of types is stored in any stack location at a specific point in the CIL instruction stream (see §I.12.3.2.1).
+ - A *local variable array* (starting at index 0) – Values of local variables are preserved across calls (in the same sense as for the evaluation stack). A local variable can hold any data type. However, a particular slot shall be used in a type consistent way (where the type system is the one described in §I.12.3.2.1). Local variables are initialized to 0 before entry if the localsinit flag for the method is set (see §I.12.2). The address of an individual local variable can be taken using the `ldloca` instruction.
+ -  An *argument array* – The values of the current method’s incoming arguments (starting at index 0). These can be read and written by logical index. The address of an argument can be taken using the `ldarga` instruction. The address of an argument is also implicitly taken by the `arglist` instruction for use in conjunction with type-safe iteration through variable-length argument lists.
+ - A *methodInfo* handle – This contains read-only information about the method. In particular it holds the signature of the method, the types of its local variables, and data about its exception handlers.
+ - A *local memory pool* – The CLI includes instructions for dynamic allocation of objects from the local memory pool (*localloc*). Memory allocated in the local memory pool is addressable. The memory allocated in the local memory pool is reclaimed upon method context termination.
+ - A *return state* handle – This handle is used to restore the method state on return from the current method. Typically, this would be the state of the method’s caller. This corresponds to what in conventional compiler terminology would be the *dynamic link*.
+ - A *security descriptor* – This descriptor is not directly accessible to managed code but is used by the CLI security system to record security overrides (**assert**, **permit-only**, and **deny**).
+
+The four areas of the method state—incoming arguments array, local variables array, local memory pool and evaluation stack—are specified as if logically distinct areas. A conforming implementation of the CLI can map these areas into one contiguous array of memory, held as a conventional stack frame on the underlying target architecture, or use any other equivalent representation technique.
+
+##### I.12.3.2.1 The evaluation stack
+Associated with each method state is an evaluation stack. Most CLI instructions retrieve their arguments from the evaluation stack and place their return values on the stack. Arguments to other methods and their return values are also placed on the evaluation stack. When a procedure call is made the arguments to the called methods become the incoming arguments array (see §I.12.3.2.2) to the method. This can require a memory copy, or simply a sharing of these two areas by the two methods
+
+The evaluation stack is made up of slots that can hold any data type, including an unboxed instance of a value type. The type state of the stack (the stack depth and types of each element on the stack) at any given point in a program shall be identical for all possible control flow paths. For example, a program that loops an unknown number of times and pushes a new element on the stack at each iteration would be prohibited.
+
+While the CLI, in general, supports the full set of types described in §I.12.1, the CLI treats the evaluation stack in a special way. While some JIT compilers might track the types on the stack in more detail, the CLI only requires that values be one of:
+
+ - `int64`, an 8-byte signed integer
+ - `int32`, a 4-byte signed integer
+ - `native int`, a signed integer of either 4 or 8 bytes, whichever is more convenient for the target architecture
+ - `F`, a floating point value (`float32`, `float64`, or other representation supported by the underlying hardware)
+ - `&`, a managed pointer
+- `O`, an object reference
+- \*, a “transient pointer,” which can be used only within the body of a single method, that points to a value known to be in unmanaged memory (see the CIL Instruction Set specification for more details. \* types are generated internally within the CLI; they are not created by the user).
+- A user-defined value type
+
+The other types are synthesized through a combination of techniques:
+ - Shorter integer types in other memory locations are zero-extended or sign-extended when loaded onto the evaluation stack; these values are truncated when stored back to their home location.
+ - Special instructions perform numeric conversions, with or without overflow detection, between different sizes and between signed and unsigned integers.
+ - Special instructions treat an integer on the stack as though it were unsigned.
+ - Instructions that create pointers which are guaranteed not to point into the memory manager’s heaps (e.g., `ldloca`, `ldarga`, and `ldsflda`) produce transient pointers (type \*) that can be used wherever a managed pointer (type &) or unmanaged pointer (type native unsigned int) is expected.
+ - When a method is called, an unmanaged pointer (type `native unsigned int` or \*) is permitted to match a parameter that requires a managed pointer (type `&`). The reverse, however, is not permitted since it would allow a managed pointer to be “lost” by the memory manager
+ - A managed pointer (type `&` can be explicitly converted to an unmanaged pointer (type `native unsigned int`), although this is not verifiable and might produce a runtime exception.
+
+##### I.12.3.2.2 Local variables and arguments
+Part of each method state is an array that holds local variables and an array that holds arguments. Like the evaluation stack, each element of these arrays can hold any single data type or an instance of a value type. Both arrays start at 0 (that is, the first argument or local variable is numbered 0). The address of a local variable can be computed using the `ldloca` instruction, and the address of an argument using the `ldarga` instruction.
+Associated with each method is metadata that specifies:
+ - whether the local variables and memory pool memory will be initialized when the method is entered.
+ - the type of each argument and the length of the argument array (but see below for variable argument lists).
+ - the type of each local variable and the length of the local variable array.
+ 
+ The CLI inserts padding as appropriate for the target architecture. That is, on some 64-bit architectures all local variables can be 64-bit aligned, while on others they can be 8-, 16-, or 32- bit aligned. The CIL generator shall make no assumptions about the offsets of local variables within the array. In fact, the CLI is free to reorder the elements in the local variable array, and different implementations might choose to order them in different ways.
+ 
+ ##### I.12.3.2.3
+The CLI works in conjunction with the class library to implement methods that accept argument lists of unknown length and type (“vararg methods”). Access to these arguments is through a type-safe iterator in the library, called `System.ArgIterator` (see §Partition IV).
+
+The CIL includes one instruction provided specifically to support the argument iterator, arglist. This instruction shall only be used within a method that is declared to take a variable number of arguments. It returns a value that is needed by the constructor for a `System.ArgIterator` object. Basically, the value created by `arglist` provides access both to the address of the argument list that was passed to the method and a runtime data structure that specifies the number and type of the arguments that were provided. This is sufficient for the class library to implement the user visible iteration mechanism.
+
+From the CLI point of view, vararg methods have an array of arguments like other methods. But only the initial portion of the array has a fixed set of types and only these can be accessed directly using the `ldarg`, `starg`, and `ldarga` instructions. The argument iterator allows access to both this initial segment and the remaining entries in the array.
+
+##### I.12.3.2.4 Local memory pool
+Part of each method state is a local memory pool. Memory can be explicitly allocated from the local memory pool using the `localloc` instruction. All memory in the local memory pool is reclaimed on method exit, and that is the only way local memory pool memory is reclaimed (there is no instruction provided to free local memory that was allocated during this method invocation). The local memory pool is used to allocate objects whose type or size is not known at compile time and which the programmer does not wish to allocate in the managed heap.
+
+Because the local memory pool cannot be shrunk during the lifetime of the method, a language implementation cannot use the local memory pool for general-purpose memory allocation.
+
+### 1.12.4 Control flow
+The CIL instruction set provides a rich set of instructions to alter the normal flow of control from one CIL instruction to the next.
+ - **Conditional and Unconditional Branch** instructions for use within a method, provided the transfer doesn’t cross a protected region boundary (see §I.12.4.2).
+ - **Method call** instructions to compute new arguments, transfer them and control to a known or computed destination method (see §I.12.4.1).
+- **Tail call** prefix to indicate that a method should relinquish its stack frame before executing a method call (see §I.12.4.1).
+- **Return** from a method, returning a value if necessary.
+- **Method jump** instructions to transfer the current method’s arguments to a known or computed destination method (see §I.12.4.1).
+- **Exception-related** instructions (see §I.12.4.2). These include instructions to initiate an exception, transfer control out of a protected region, and end a filter, catch clause, or finally clause.
+
+While the CLI supports control transfers within a method, there are several restrictions that shall be observed:
+ - Control transfer is never permitted to enter a catch handler or finally clause (see §I.12.4.2) except through the exception handling mechanism.
+ - Control transfer out of a protected region is covered in §I.12.4.2.
+ - The evaluation stack shall be empty after the return value is popped by a `ret` instruction
+ - Regardless of the control flow that allows execution to arrive there, each slot on the stack shall have the same data type at any given point within the method body.
+ - In order for the JIT compilers to efficiently track the data types stored on the stack, the stack shall normally be empty at the instruction following an unconditional control transfer instruction (`br`, `br.s`, `ret`, `jmp`, `throw`, `endfilter`, `endfault`, or `endfinally`). The stack shall be non-empty at such an instruction only if at some earlier location within the method there has been a forward branch to that instruction.
+- Control is not permitted to simply “fall through” the end of a method. All paths shall terminate with one of these instructions: `ret`, `throw`, `jmp`, or (`tail`. followed by `call`, `calli`, or `callvirt`).
+
+#### I.12.4.1 Method calls
+Instructions emitted by the CIL code generator contain sufficient information for different implementations of the CLI to use different native calling conventions. All method calls initialize the method state areas (see §I.12.3.2) as follows:
+ - The incoming arguments array is set by the caller to the desired values.
+ - The local variables array always has null for object types and for fields within value types that hold objects. In addition, if the localsinit flag is set in the method header, then the local variables array is initialized to 0 for all integer types and to 0.0 for all floating-point types. Value types are not initialized by the CLI, but verified code will supply a call to an initializer as part of the method’s entry point code.
+ - The evaluation stack is empty.
+
+##### I.12.4.1.1 Call site descriptors
+Call sites specify additional information that enables an interpreter or JIT compiler to synthesize any native calling convention. All CIL calling instructions (`call`, `calli`, and `callvirt`) include a description of the call site. This description can take one of two forms. The simpler form, used with the `calli` instruction, is a “call site description” (represented as a metadata token for a standalone call signature) that provides:
+ - The number of arguments being passed.
+ - The data type of each argument.
+ - The order in which they have been placed on the call stack.
+ - The native calling convention to be used.
+
+The more complicated form, used for the `call` and `callvirt` instructions, is a “method reference” (a metadata **methodref** token) that augments the call site description with an identifier for the target of the call instruction.
+
+##### I.12.4.1.2 calling instructions
+The CIL has three call instructions that are used to transfer argument values to a destination method. Under normal circumstances, the called method will terminate and return control to the calling method.
+ - `call` is designed to be used when the destination address is fixed at the time the CIL is linked. In this case, a method reference is placed directly in the instruction. This is comparable to a direct call to a static function in C. It can be used to call static or instance methods or the (statically known) base class method within an instance method body.
+ - `calli` is designed for use when the destination address is calculated at run time. A method pointer is passed on the stack and the instruction contains only the call site description.
+ - `callvirt`, part of the CIL common type system instruction set, uses the class of an object (known only at runtime) to determine the method to be called. The instruction includes a method reference, but the particular method isn’t computed until the call actually occurs. This allows an instance of a derived class to be supplied and the method appropriate for that derived class to be invoked. The `callvirt` instruction is used both for instance methods and methods on interfaces. For further details, see the CTS specification and the CIL instruction set specification in Partition III.
+ 
+ In addition, each of these instructions can be immediately preceded by a `tail.` instruction prefix. This specifies that the calling method terminates with this method call (and returns whatever value is returned by the called method). The `tail.` prefix instructs the JIT compiler to discard the caller’s method state prior to making the call (if the call is from untrusted code to trusted code the frame cannot be fully discarded for security reasons). When the called method executes a ret instruction, control returns not to the calling method but rather to wherever that method would itself have returned (typically, return to caller’s caller). Notice that the tail. instruction shortens the lifetime of the caller’s frame so it is unsafe to pass managed pointers (type `&`) as arguments.
+ 
+ Finally, there are two instructions that indicate an optimization of the `tail.` case:
+ - `jmp` is followed by a **methodref** or **methoddef** token and indicates that the current method’s state should be discarded, its arguments should be transferred intact to the destination method, and control should be transferred to the destination. The signature of the calling method shall exactly match the signature of the destination method.
+
+##### I.12.4.1.3 Computed destinations
+The destination of a method call can be either encoded directly in the CIL instruction stream (the `call` and `jmp` instructions) or computed (the `callvirt`, and `calli` instructions). The destination address for a callvirt instruction is automatically computed by the CLI based on the method token and the value of the first argument (the **this** pointer). The method token shall refer to a virtual method on a class that is a direct ancestor of the class of the first argument. The CLI computes the correct destination by locating the nearest ancestor of the first argument’s class that supplies an implementation of the desired method.
+
+[**Note**: The implementation can be assumed to be more efficient than the linear search implied here. **end note**]
+
+For the `calli` instruction the CIL code is responsible for computing a destination address and pushing it on the stack. This is typically done through the use of an `ldftn` or ldvirtfn instruction at some earlier time. The `ldftn` instruction includes a metadata token in the CIL stream that specifies a method, and the instruction pushes the address of that method. The `ldvirtfn` instruction takes a metadata token for a virtual method in the CIL stream and an object on the stack. It performs the same computation described above for the `callvirt` instruction but pushes the resulting destination on the stack rather than calling the method.
+
+The `calli` instruction includes a call site description that includes information about the native calling convention that should be used to invoke the method. Correct CIL code shall specify a calling convention in the `calli` instruction that matches the calling convention for the method that is being called.
+
+##### I.12.4.1.4 Virtual calling convention
+The CIL provides a “virtual calling convention” that is converted by the JIT compiler into a native calling convention. The JIT compiler determines the optimal native calling convention for the target architecture. This allows the native calling convention to differ from machine to machine, including details of register usage, local variable homes, copying conventions for large call-by-value objects (as well as deciding, based on the target machine, what is considered “large”). This also allows the JIT compiler to reorder the values placed on the CIL virtual stack to match the location and order of arguments passed in the native calling convention.
+
+The CLI uses a single uniform calling convention for all method calls. It is the responsibility of the implementation to convert this into the appropriate native calling convention. The contents of the stack at the time of a call instruction (`call`, `calli`,  `callvirt` any of which can be preceded by `tail.`) are as follows:
+- If the method being called is an instance method (class or interface) or a virtual method, the **this** pointer is the first object on the stack at the time of the call instruction. For methods on objects (including boxed value types), the **this** pointer is of type `O` (object reference). For methods on value types, the **this** pointer is provided as a byref parameter; that is, the value is a pointer (managed, `&`, or unmanaged, * or `native int`) to the instance.
+ - The remaining arguments appear on the stack in left-to-right order (that is, the lexically leftmost argument is the lowest on the stack, immediately following the **this** pointer, if any). §I.12.4.1.5 describes how each of the three parameter passing conventions (by-value, byref, and typed reference) should be implemented.
+
+##### I.12.4.1.5 Parameter passing
+The CLI supports three kinds of parameter passing, all indicated in metadata as part of the signature of the method. Each parameter to a method has its own passing convention (e.g., the first parameter can be passed by-value while all others are passed byref). Parameters shall be passed in one of the following ways (see detailed descriptions below):
+ - **By-value** – where the **value** of an object is passed from the caller to the callee.
+ - **By-reference** – where the **address** of the data is passed from the caller to the callee, and the type of the parameter is therefore a managed or unmanaged pointer.
+ - **Typed reference** – where a runtime representation of the data type is passed along with the address of the data, and the type of the parameter is therefore one specially supplied for this purpose.
+
+It is the responsibility of the CIL generator to follow these conventions. Verification checks that the types of parameters match the types of values passed, but is otherwise unaware of the details of the calling convention.
+
+###### I.12.4.1.5.1 By-value parameters
+For built-in types (integers, floats, etc.) the caller copies the value onto the stack before the call. For objects the object reference (type `O`) is pushed on the stack. For managed pointers (type `&`) or unmanaged pointers (type `native unsigned int`), the address is passed from the caller to the callee. For value types, see the protocol in §I.12.1.6.2.
+
+###### I.12.4.5.2 By-referece parameters
+By-reference parameters (identified by the presence of a byref constraint) are the equivalent of C++ reference parameters or PASCAL **var** parameters: instead of passing as an argument the value of a variable, field, or array element, its address is passed instead; and any assignment to the corresponding parameter actually modifies the corresponding caller’s variable, field, or array element. Much of this work is done by the higher-level language, which hides from the user the need to compute addresses to pass a value and the use of indirection to reference or update values.
+
+Passing a value by reference requires that the value have a home (see §I.12.1.6.1) and it is the address of this home that is passed. Constants, and intermediate values on the evaluation stack, cannot be passed as byref parameters because they have no home.
+
+The CLI provides instructions to support byref parameters:
+ - calculate addresses of home locations (see §Table I.8: Address and Type of Home Locations).
+ - load and store built-in data types through these address pointers (`ldind.*`, `stind.*`, `ldfld`, etc.)
+ - copy value types (`ldobj` and `cpobj`).
+
+Some addresses (e.g., local variables and arguments) have lifetimes tied to that method invocation. These shall not be referenced outside their lifetimes, and so they should not be stored in locations that last beyond their lifetime. The CIL does not (and cannot) enforce this restriction, so the CIL generator shall enforce this restriction or the resulting CIL will not work correctly. For code to be verifiable (see §I.8.8) byref parameters shall **only** be passed to other methods or referenced via the appropriate `stind` or `ldind` instructions.
+
+###### I.12.4.1.5.3 Typed reference parameters
+By-reference parameters and value types are sufficient to support statically typed languages (C++, Pascal, etc.). They also support dynamically typed languages that pay a performance penalty to box value types before passing them to polymorphic methods (Lisp, Scheme, Smalltalk, etc.). Unfortunately, they are not sufficient to support languages like Visual Basic that require byref passing of unboxed data to methods that are not statically restricted as to the type of data they accept. These languages require a way of passing both the address of the home of the data *and* the static type of the home. This is exactly the information that would be provided if the data were boxed, but without the heap allocation required of a box operation.
+ 
+ [*Note:* If it were not for the fact that verification and the memory manager need to be aware of the data type and the corresponding address, a byref parameter could be implemented as a standard value type with two fields: the address of the data and the type of the data. *end note*]
+
+Like a regular *byref* parameter, a typed reference parameter can refer to a home that is on the stack, and that home will have a lifetime limited by the call stack. Thus, the CIL generator shall apply appropriate checks on the lifetime of byref parameters; and verification imposes the same restrictions on the use of typed reference parameters as it does on byref parameters (see §I.12.4.1.5.2).
+
+A typed reference is passed by either creating a new typed reference (using the `mkrefany` instruction) or by copying an existing typed reference. Given a typed reference argument, the address to which it refers can be extracted using the `refanyval` instruction; the type to which it refers can be extracted using the `refanytype` instruction.
+
+###### I.12.4.1.5.4 Parameter interactions
+A given parameter can be passed using any one of the parameter passing conventions: by-value, by-reference, or typed reference. No combination of these is allowed for a single parameter, although a method can have different parameters with different calling mechanisms.
+
+A parameter that has been passed in as typed reference shall not be passed on as by-reference or by-value without a runtime type check and (in the case of by-value) a copy.
+
+A byref parameter can be passed on as a typed reference by attaching the static type.
+
+§Table I.9: Parameter Passing Conventions illustrates the parameter passing convention used for each data type.
+
+**Table I.9: Parameter Passing Conventions**
+| **Type of data** | **Pass By** | **How data is sent**|
+| ---------- | ---------- | ---------- |
+| Built-in value type (int, float, etc.) | Value | Copied to called method, type statically known at both sides |
+| Built-in value type (int, float, etc.) | Reference | Address sent to called method, type statically known at both sides |
+| Built-in value type (int, float, etc.) | Typed reference | Address sent along with type information to called method |
+| User-defined value type | Value | Called method receives a copy; type statically known at both side |
+| User-defined value type | Reference | Address sent to called method, type statically known at both sides |
+| User-defined value type | Address sent along with type information to called method |
+| Object | Value | Reference to data sent to called method, type statically known and class available from reference |
+| Object | Reference | Address of reference sent to called method, type statically known and class available from reference |
+| Object | Typed reference | Address of reference sent to called method along with static type information, class (i.e., dynamic type) available from reference |
+
+#### I.12.4.2 Exception handling
+Exception handling is supported in the CLI through exception objects and protected blocks of code. When an exception occurs, an object is created to represent the exception. All exception objects are instances of some class (i.e., they can be boxed value types, but not pointers, unboxed value types, etc.). Users can create their own exception classes, typically by deriving from `System.Exception` (see §Partition IV).
+
+There are four kinds of handlers for protected blocks. A single protected block shall have exactly one handler associated with it:
+
+ - A **finally handler** that shall be executed whenever the block exits, regardless of whether that occurs by normal control flow or by an unhandled exception.
+- A **fault handler** that shall be executed if an exception occurs, but not on completion of normal control flow.
+- A **catch handler** that handles any exception of a specified class or any of its subclasses.
+- A **filter handler** that runs a user-specified set of CIL instructions to determine if the exception should be handled by the associated handler, or passed on to the next protected block.
+
+Protected regions, the type of the associated handler, and the location of the associated handler and (if needed) user-supplied filter code are described through an Exception Handler Table associated with each method. The exact format of the Exception Handler Table is specified in detail in §Partition II. Details of the exception handling mechanism are also specified in §Partition II.
+
+##### I.12.4.2.1 Exceptions thrown by the CLI
+CLI instructions can throw the following exceptions as part of executing individual instructions. The documentation for each instruction lists all the exceptions the instruction can throw (except for the general purpose `System.ExecutionEngineException` described below that can be generated by all instructions)
+
+Base Instructions (see §Partition III)
+ - `System.ArithmeticException`
+ - `System.DivideByZeroException`
+ - `System.ExecutionEngineException`
+ - `System.InvalidAddressException`
+ - `System.OverflowException`
+ - `System.SecurityException`
+ - `System.StackOverflowException`
+
+Object Model Instructions (see §Partition III)
+ - `System.TypeLoadException`
+ - `System.IndexOutOfRangeException`
+ - `System.InvalidAddressException`
+ - `System.InvalidCastException`
+ - `System.MissingFieldException`
+ - `System.MissingMethodException`
+ - `System.NullReferenceException`
+ - `System.OutOfMemoryException`
+ - `System.SecurityException`
+ - `System.StackOverflowException`
+ 
+ The `System.ExecutionEngineException` is special. It can be thrown by any instruction and indicates an unexpected inconsistency in the CLI. Running exclusively verified code can never cause this exception to be thrown by a conforming implementation of the CLI. However, unverified code (even though that code is conforming CIL) can cause this exception to be thrown if it might corrupt memory. Any attempt to execute non-conforming CIL or non-conforming file formats can result in unspecified behavior: a conforming implementation of the CLI need not make any provision for these cases.
+
+There are no exceptions for things like ‘MetaDataTokenNotFound.’ CIL verification (see §Partition III) will detect this inconsistency before the instruction is executed, leading to a verification violation. If the CIL is not verified this type of inconsistency shall raise `System.ExecutionEngineException`.
+
+Exceptions can also be thrown by the CLI, as well as by user code, using the `throw` instruction. The handling of an exception is identical, regardless of the source.
+
+##### I.12.4.2.2 Deriving from exception classes
+Certain types of exceptions thrown by the CLI can be derived from to provide more information to the user. The specification of CIL instructions in §Partition III describes what types of exceptions should be thrown by the runtime environment when an abnormal situation occurs. Each of these descriptions allows a conforming implementation to throw an object of the type described or an object of a derived class of that type.
+
+[*Note:* For instance, the specification of the `ckfinite` instruction requires that an exception of type `System.ArithmeticException` or a derived class of `ArithmeticException` be thrown by the CLI. A conforming implementation might simply throw an exception of type `ArithmeticException`, but it might also choose to provide more information to the programmer by throwing an exception of type `NotFiniteNumberException` with the offending number. *end note*]
+
+##### I.12.4.2.3 Resolution exceptions
+CIL allows types to reference, among other things, interfaces, classes, methods, and fields. Resolution errors occur when references are not found or are mismatched. Resolution exceptions can be generated by references from CIL instructions, references to base classes, to implemented interfaces, and by references from signatures of fields, methods and other class members.
+
+To allow scalability with respect to optimization, detection of resolution exceptions is given latitude such that it might occur as early as install time and as late as execution time.
+
+The latest opportunity to check for resolution exceptions from all references except CIL instructions is as part of initialization of the type that is doing the referencing (see §Partition II). If such a resolution exception is detected the static initializer for that type, if present, shall not be executed.
+
+The latest opportunity to check for resolution exceptions in CIL instructions is as part of the first execution of the associated CIL instruction. When an implementation chooses to perform resolution exception checking in CIL instructions as late as possible, these exceptions, if they occur, shall be thrown prior to any other non-resolution exception that the VES might throw for that CIL instruction. Once a CIL instruction has passed the point of throwing resolution errors (it has completed without exception, or has completed by throwing a non-resolution exception), subsequent executions of that instruction shall no longer throw resolution exceptions.
+
+If an implementation chooses to detect some resolution errors, from any references, earlier than the latest opportunity for that kind of reference, it is not required to detect all resolution exceptions early.
+
+An implementation that detects resolution errors early is allowed to prevent a class from being installed, loaded or initialized as a result of resolution exceptions detected in the class itself or in the transitive closure of types from following references of any kind.
+
+For example, each of the following represents a permitted scenario. An installation program can throw resolution exceptions (thus failing the installation) as a result of checking CIL instructions for resolution errors in the set of items being installed. An implementation is allowed to fail to load a class as a result of checking CIL instructions in a referenced class for resolution errors. An implementation is permitted to load and initialize a class that has resolution errors in its CIL instructions.
+
+The following exceptions are among those considered resolution exceptions:
+ - `BadImageFormatException`
+ - `EntryPointNotFoundException`
+ - `MissingFieldException`
+ - `MissingMemberException`
+ - `MissingMethodException`
+ - `NotSupportedException`
+ - `TypeLoadException`
+ - `TypeUnloadedException`
+
+For example, when a referenced class cannot be found, a `TypeLoadException` is thrown. When a referenced method (whose class is found) cannot be found, a `MissingMethodException` is thrown. If a matching method being used consistently is accessible, but violates declared security policy, a `SecurityException` is thrown.
+
+##### I.12.4.2.4 Timing and choice of exceptions
+Certain types of exceptions thrown by CIL instructions might be detected before the instruction is executed. In these cases, the specific time of the throw is not precisely defined, but the exception should be thrown no later than the instruction is executed. Relaxation of the timing of exceptions is provided so that an implementation can choose to detect and throw an exception before any code is run (e.g., at the time of CIL to native code conversion).
+
+There is a distinction between the time of detecting the error condition and throwing the associated exception. An error condition can be detected early (e.g., at JIT time), but the condition can be signaled later (e.g., at the execution time of the offending instruction) by throwing an exception.
+
+The following exceptions are among those that can be thrown early by the runtime:
+ - `MissingFieldException`
+ - `MissingMethodException`
+ - `SecurityException`
+ - `TypeLoadException`
+
+In addition, as to when class initialization (see §Partition II) occurs is not fully specified. In particular, there is no guarantee when `System.TypeInitializationException` might be thrown.
+
+If more than one exception's conditions are met by a method invocation, as to which exception is thrown is unspecified.
+
+##### I.12.4.2.5 Overview of exception handling
+See the exception handling specification in §Partition II for details.
+
+Each method in an executable has associated with it a (possibly empty) array of exception handling information. Each entry in the array describes a protected block, its filter, and its handler (which shall be a **catch** handler, a **filter** handler, a **finally** handler, or a **fault** handler). When an exception occurs, the CLI searches the array for the first protected block that
+ - Protects a region including the current instruction pointer *and*
+ - Is a catch handler block *and*
+ - Whose filter wishes to handle the exception
+
+If a match is not found in the current method, the calling method is searched, and so on. If no match is found the CLI will dump a stack trace and abort the program.
+
+[*Note:* A debugger can intervene and treat this situation like a breakpoint, before performing any stack unwinding, so that the stack is still available for inspection through the debugger. *end note*]
+
+If a match is found, the CLI walks the stack back to the point just located, but this time calling the **finally** and **fault** handlers. It then starts the corresponding exception handler. Stack frames are discarded either as this second walk occurs or after the handler completes, depending on information in the exception handler array entry associated with the handling block.
+
+Some things to notice are:
+ - The ordering of the exception clauses in the Exception Handler Table is important. If handlers are nested, the most deeply nested try blocks shall come before the try blocks that enclose them.
+ - Exception handlers can access the local variables and the local memory pool of the routine that catches the exception, but any intermediate results on the evaluation stack at the time the exception was thrown are lost.
+ - An exception object describing the exception is automatically created by the CLI and pushed onto the evaluation stack as the first item upon entry of a filter or catch clause.
+ - Execution cannot be resumed at the location of the exception, except with a **filter handler**.
+
+##### I.12.4.2.6 CIL support for exceptions
+The CIL has special instructions to:
+ - **Throw** and **rethrow** a user-defined exception.
+ - **Leave** a protected block and execute the appropriate **finally** clauses within a method, without throwing an exception. This is also used to exit a **catch** clause. Notice that leaving a protected block does not cause the fault clauses to be called.
+ - End a user-supplied filter clause (*endfilter*) and return a value indicating whether to handle the exception.
+ - End a finally clause (*endfinally*) and continue unwinding the stack.
+
+##### I.12.4.2.7 Lexical nesting of protected blocks
+A *protected region* (also called a *try block*) is described by an address and a length: the **trystart** is the address of the first instruction to be protected, and the **trylength** is the length of the protected region. (The **tryend**, the address immediately following the last instruction to be protected, can be trivially computed from these two). A handler region is described by an address and a length: the **handlerstart** is the address of the first instruction of the handler and the **handlerlength** is the length of the handler region. (The **handlerend**, the address immediately following the last instruction of the handler, can be trivially computed from these two.)
+
+Every method can have associated with it a set of **exception entries**, called the **exception set**. Each **exception entry** consists of
+ - Optional: a type token (the type of exception to be handled) or **filterstart** (the address of the first instruction of the user-supplied filter code)
+ - Required: **protected block**
+ - Required: **handler region**. There are four kinds of handler regions: catch handlers, filtered handlers, finally handlers, and fault handlers. (A filtered handler is the code that runs if the filter evaluates to true.)
+ 
+If an exception entry contains a **filterstar**, then **filterstart** strictly precedes **handlerstart**. The filter starts at the instruction specified by **filterstart** and contains all instructions up to (but not including) that specified by **handlerstart.** The lexically last instruction in the filter must be endfilter. If there is no **filterstart** then the filter is empty (hence it does not overlap with any region).
+
+No two regions (protected block, filter, handler region) of a single exception entry may overlap with one another.
+
+Each region must begin and end on an instruction boundary.
+ 
+For every pair of exception entries in an exception set, one of the following must be true:
+ - They **nest**: all three regions of one entry shall be within a single region of the other entry, with the further restriction that the enclosing region shall not be a filter. [*Note:* Functions called from within a filter can contain exception handling. *end note*]
+ - They are **disjoint**: all six regions of the two entries are pairwise-disjoint (no addresses overlap).
+ - They **mutually protect**: the protected blocks are the same and the other regions are pairwise-disjoint. In this case, all handlers shall be either catch handlers or filtered handlers. The precedence of the handler regions is determined by their ordering in the Exception Handler Table (§Partition II).
+
+The encoding of an exception entry in the file format (see §Partition II) guarantees that only a filtered handler (not a catch handler, fault handler or finally handler) can have a filter.
+
+An *exception-handling* block is either a protected region, a filter, a catch handler, a filter handler, a fault handler, or a finally handler.
